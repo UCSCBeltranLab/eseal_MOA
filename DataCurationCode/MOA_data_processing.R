@@ -7,6 +7,7 @@ library(here)
 library(conflicted)
 library(tidyverse)
 library(lubridate)
+
 conflicts_prefer(dplyr::lag)
 
 # read in tide data
@@ -214,7 +215,7 @@ weaner_data <- weaner_data %>%
 n_distinct(weaner_data$MomAnimalID)
 n_distinct(weaner_data$year)
 
-##are there duplicates?
+##are there duplicates (1 mom with 2 pup weight measurements in the same year)
 wean_dup_cases <- weaner_data %>%
   count(MomAnimalID, year) %>%
   filter(n > 1)
@@ -223,17 +224,6 @@ wean_dup_cases <- weaner_data %>%
 wean_dup_rows <- weaner_data %>%
   semi_join(wean_dup_cases, by = c("MomAnimalID", "year")) %>%
   arrange(MomAnimalID, year)
-
-# 1) identify mother-year cases with multiple pup IDs
-multi_pup_cases <- weaner_data %>%
-  group_by(MomAnimalID, year) %>%
-  summarise(n_pups = n_distinct(pupID),
-            .groups = "drop") %>%
-  filter(n_pups > 1)
-
-# 2) remove ambiguous multi-pup mother-year cases
-weaner_data <- weaner_data %>%
-  anti_join(multi_pup_cases, by = c("MomAnimalID", "year"))
 
 # 3) filter wean weight data
 weaner_data <- weaner_data %>%
@@ -245,10 +235,10 @@ weaner_data <- weaner_data %>%
          days_post_wean = as.numeric(weighingdate - weandate)) %>% #calculate the number of days between weaning and weighing
   filter(days_post_wean >= 0) %>% #only animals weighed as actual weans
   filter(days_post_wean <= 71) %>% #excluding wildly wrong wean dates
-  filter(Wt <= 170) %>% #no super weaners
-  mutate(Wt_wean_corrected = Wt * exp(0.00596 * days_post_wean)) #back-correction for wean mass based on fasting rate
+  mutate(Wt_wean_corrected = Wt * exp(0.00596 * days_post_wean)) %>% #back-correction for wean mass based on fasting rate
+  filter(Wt_wean_corrected <= 170) #no super weaners
 
-##check the remaining duplicates (the same pup weighed twice post-weaning)
+##check the remaining duplicates (all the same pup weighed twice post-weaning)
 final_wean_duplicates <- weaner_data %>%
   group_by(animalID, season) %>%
   filter(n() > 1)

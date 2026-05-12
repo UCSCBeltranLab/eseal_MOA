@@ -3,6 +3,7 @@
 lapply(
   c("tidyverse",
     "scales",
+    "here",
     
     # modeling
     "lme4",
@@ -24,7 +25,7 @@ lapply(
     "flextable",
     "broom.mixed",
     
-    # spatial / maps
+    # spatial
     "sf",
     "lubridate",
     "rnaturalearth",
@@ -46,13 +47,13 @@ conflict_prefer("summarize", "dplyr")
 conflict_prefer("arrange", "dplyr")
 conflict_prefer("count", "dplyr")
 
-# Bootstrap setup 
+### Bootstrap setup ###
 set.seed(123)
-nsim <- 100
+nsim <- 100 # keep 100 simulations
 
 ### Read modeling variables csv ###
 
-data_pull <- read_csv(here("IntermediateData", "MOA_data_pull.csv"))
+data_pull <- read_csv(here("IntermediateData", "MOA_data_pull.csv"), show_col_types = FALSE)
 
 #### Calculate mother-offspring association ####
 
@@ -113,7 +114,7 @@ cor(vars, use = "pairwise.complete.obs", method = "pearson")
 
 # MODELING FRAMEWORK --------------------
 
-# For Models 1a/1b and 2a/2b MOA is a proportion in (0,1] as the response variable (where successes = the number of observations a mother was seen with 1 pup)
+# For Models 1a/1b and 2a/2b the response is MOA as a proportion in (0,1] (where successes = the number of observations a mother was seen with 1 pup)
 # All models are a binomial with logit link, weighted by the total observations (weights = total_resights)
 # We use bobyqa as a robust optimizer to improve model convergence
 # Random effects for animalID and season are included
@@ -140,7 +141,7 @@ model_variables_2016_2023 <- model_variables %>%
 # 2) all predictors model
 mod_age_2016_2023 <- glmer(MOA_proportion ~ age + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
                              weights = total_resights,
-                             family = binomial(link= "logit"),
+                             family = binomial(link = "logit"),
                              control = glmerControl(optimizer = "bobyqa"),
                              data = model_variables_2016_2023); summary(mod_age_2016_2023)
 
@@ -158,7 +159,7 @@ check_collinearity(mod_age_2016_2023) #check predictor VIFs
 
 mod_exp_2016_2023 <- glmer(MOA_proportion ~ pupping_exp + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
                                  weights = total_resights,
-                                 family = binomial(link= "logit"),
+                                 family = binomial(link = "logit"),
                                  control = glmerControl(optimizer = "bobyqa"),
                                  data = model_variables_2016_2023); summary(mod_exp_2016_2023) #model summary
 
@@ -176,7 +177,7 @@ check_collinearity(mod_exp_2016_2023) #check predictor VIFs
 
 mod_age_1996_2025 <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
                            weights = total_resights,
-                           family = binomial(link= "logit"),
+                           family = binomial(link = "logit"),
                            control = glmerControl(optimizer = "bobyqa"),
                            data = model_variables); summary(mod_age_1996_2025)
 
@@ -218,6 +219,7 @@ ggplot(model_variables, aes(x = Wt_wean_corrected)) +
        x = "Weight (kg)",
        y = "Count")
 
+#fit linear model
 mod_wean_mass <- lmerTest::lmer(Wt_wean_corrected ~ MOA_proportion + age + (1 | season_fct) + (1 | animalID_fct),
                           data = model_variables); summary(mod_wean_mass)
 fixef(mod_wean_mass)["MOA_proportion"] * 0.1
@@ -300,7 +302,7 @@ conceptual_MOA_plot <- ggplot(MOA_plot_df, aes(date, 1, fill = pup_status)) +
         legend.position = "top",
         legend.title = element_text(face = "bold", size = 19)); conceptual_MOA_plot
 
-ggsave("./TablesFigures/MOA_plot_conceptual.png", conceptual_MOA_plot, height = 7, width = 15, dpi = 1000)
+ggsave(here("TablesFigures", "MOA_plot_conceptual.png"), conceptual_MOA_plot, height = 7, width = 15, dpi = 1000)
 
 #### Figure 1b (MOA distribution across years) ####
 
@@ -349,7 +351,7 @@ MOA_distribution_years <- ggplot(MOA_percent_data,
         legend.position = "left",
         legend.justification = "top"); MOA_distribution_years
 
-ggsave("./TablesFigures/MOA_distribution_years.png", MOA_distribution_years, height = 7, width = 17, dpi = 1000)
+ggsave(here("TablesFigures", "MOA_distribution_years.png"), MOA_distribution_years, height = 7, width = 17, dpi = 1000)
 
 #### Figure 2a (age, 2016-2023) ####
 
@@ -742,16 +744,15 @@ plot_age_exp <- plot_grid(age_plots, exp_plots,
 plot_age_exp
 
 # 4) Save figure
-ggsave("./TablesFigures/Figure2.png", plot_age_exp, width = 17, height = 10, dpi = 400)
+ggsave(here("TablesFigures", "Figure2.png"), plot_age_exp, width = 17, height = 10, dpi = 400)
 
 #### Figure 3a (density conceptual map) ####
 
-# 1) Read beaches shapefile
-beaches <- st_read("./RawData/ANM map/Ano Nuevo Map Final.shp", quiet = TRUE) %>%
-  select(-id)
+# 1) Read beaches geopackage
+beaches <- st_read(here("RawData", "beaches.gpkg"), quiet = TRUE)
 
 # 2) Read density data
-seal_density <- read.csv("./RawData/seal_density.csv")
+seal_density <- read_csv(here("IntermediateData", "seal_density.csv"), show_col_types = FALSE)
 
 # 3) Mean density per beach across years
 area_density_mean <- seal_density %>%
@@ -816,7 +817,7 @@ seal_density_map <- ggplot() +
         axis.title = element_blank(),
         panel.grid = element_blank()); seal_density_map
 
-ggsave("./TablesFigures/Figure3a.png", plot = seal_density_map, width = 18, height = 14, dpi = 300, bg = "transparent")
+ggsave(here("TablesFigures", "Figure3a.png"), plot = seal_density_map, width = 18, height = 14, dpi = 300, bg = "transparent")
 
 # project to meters
 beaches_m <- st_transform(beaches_density, 32610)
@@ -909,7 +910,7 @@ plot_density <- ggplot() +
   labs(x = "Conspecific density (seals in a 10m radius)",
        y = "Mother-offspring association"); plot_density
 
-ggsave("./TablesFigures/Figure3b.png", plot_density, width = 11, height = 8, dpi = 800)
+ggsave(here("TablesFigures", "Figure3b.png"), plot_density, width = 11, height = 8, dpi = 800)
 
 ########### Figure 3c (extreme wave and tide effect) ############
 
@@ -1019,7 +1020,7 @@ plot_n_extreme <- ggplot() +
   theme_few(base_size = 28) +
   labs(x = "Number of per-year extreme wave and tide events", y = "Mother-offspring association"); plot_n_extreme
 
-ggsave("./TablesFigures/Figure3c.png", plot_n_extreme, width = 11, height = 8, dpi = 800)
+ggsave(here("TablesFigures", "Figure3c.png"), plot_n_extreme, width = 11, height = 8, dpi = 800)
 
 #### Figure 3b (with raw data points) ####
 
@@ -1051,7 +1052,7 @@ plot_density_jitter <- ggplot() +
   labs(x = "Conspecific density (seals in a 10m radius)",
        y = "Mother-offspring association"); plot_density_jitter
 
-ggsave("./TablesFigures/Figure3b_raw.png", plot_density_jitter, width = 10, height = 8, dpi = 800)
+ggsave(here("TablesFigures", "Figure3b_raw.png"), plot_density_jitter, width = 10, height = 8, dpi = 800)
 
 #### Figure 3c (with raw data points) ####
 
@@ -1080,7 +1081,7 @@ plot_n_extreme_jitter <- ggplot() +
   labs(x = "Number of per-year extreme wave and tide events",
        y = "Mother-offspring association"); plot_n_extreme_jitter
 
-ggsave("./TablesFigures/Figure3c_raw.png", plot_n_extreme_jitter, width = 6, height = 8, dpi = 800)
+ggsave(here("TablesFigures", "Figure3c_raw.png"), plot_n_extreme_jitter, width = 6, height = 8, dpi = 800)
 
 #### Figure 4 (offspring weaning mass vs. MOA) ####
 
@@ -1110,7 +1111,7 @@ plot_wean <- ggplot() +
        y = "Offspring weaning mass (kg)") +
   theme_classic(base_size = 20); plot_wean
 
-ggsave("./TablesFigures/Figure4.png", plot_wean, width = 10, height = 8, dpi = 800)
+ggsave(here("TablesFigures", "Figure4.png"), plot_wean, width = 10, height = 8, dpi = 800)
 
 # SUPPLEMENTARY TABLES AND FIGURES -----------------------------------
 
@@ -1169,7 +1170,7 @@ make_mod_flextable(mod_age_2016_2023,
                                         "age" = "Maternal age",
                                         "n_extreme_both" = "Number of extreme wave and tide events",
                                         "avg_density" = "Conspecific density"),
-                   save_path = "./TablesFigures/mod_age_2016_2023_output.docx")
+                   save_path = here("TablesFigures", "mod_age_2016_2023_output.docx"))
 
 ### Table S2. Model output from the 2016-2023 model with previous pupping experience ###
 make_mod_flextable(mod_exp_2016_2023,
@@ -1177,28 +1178,28 @@ make_mod_flextable(mod_exp_2016_2023,
                                         "pupping_exp" = "Previous pupping experience",
                                         "n_extreme_both" = "Number of extreme wave and tide events",
                                         "avg_density" = "Conspecific density"),
-                   save_path = "./TablesFigures/mod_exp_2016_2023_output.docx")
+                   save_path = here("TablesFigures", "mod_exp_2016_2023_output.docx"))
 
 ### Table S3. Model output from the 1996-2025 piecewise segmented regression for maternal age. ###
 make_mod_flextable(mod_age_1996_2025,
                    predictor_labels = c("(Intercept)" = "Intercept",
                                         "age_catYoung:age10" = "Maternal age : Pre-threshold (< 9 years)",
                                         "age_catOld:age10" = "Maternal age : Post-threshold (≥ 9 years)"),
-                   save_path = "./TablesFigures/mod_age_1996_2025_output.docx")
+                   save_path = here("TablesFigures", "mod_age_1996_2025_output.docx"))
 
 ### Table S4. Model output from the 1996-2025 piecewise segmented regression for previous pupping experience. ###
 make_mod_flextable(mod_exp_1996_2025,
                    predictor_labels = c("(Intercept)" = "Intercept",
                                         "experience_catInexperienced:exp10" = "Previous pupping experience : Pre-threshold (< 5 previous pups)",
                                         "experience_catExperienced:exp10" = "Previous pupping experience : Post-threshold (≥ 5 previous pups)"),
-                   save_path = "./TablesFigures/mod_exp_1996_2025_output.docx")
+                   save_path = here("TablesFigures", "mod_exp_1996_2025_output.docx"))
 
 ### Table S5. Model output for the effects of maternal age and mother-offspring association on offspring weaning mass. ###
 make_mod_flextable(mod_wean_mass,
                    predictor_labels = c("(Intercept)" = "Intercept",
                                         "MOA_proportion" = "Mother-offspring association",
                                         "age" = "Maternal age"),
-                   save_path = "./TablesFigures/mod_wean_mass_output.docx")
+                   save_path = here("TablesFigures", "mod_wean_mass_output.docx"))
 
 #### Table S6 (age linear vs. quadratic vs. breakpoint, 1996-2025) ####
 
@@ -1254,7 +1255,7 @@ aic_table_age_1996_2025 <- flextable(aic_table_age_1996_2025) %>%
        part = "body"); aic_table_age_1996_2025
 
 #save final table
-save_as_docx(aic_table_age_1996_2025, path = "./TablesFigures/2016_2023_Age_Predictor_Comparison.docx")
+save_as_docx(aic_table_age_1996_2025, path = here("TablesFigures", "2016_2023_Age_Predictor_Comparison.docx"))
 
 #### Table S7 (age linear vs. quadratic vs. breakpoint, 2016-2023) ####
 
@@ -1310,7 +1311,7 @@ aic_table_age_2016_2023 <- flextable(aic_table_age_2016_2023) %>%
        part = "body"); aic_table_age_2016_2023
 
 #save final table
-save_as_docx(aic_table_age_2016_2023, path = "./TablesFigures/2016_2023_Age_Predictor_Comparison.docx")
+save_as_docx(aic_table_age_2016_2023, path = here("TablesFigures", "2016_2023_Age_Predictor_Comparison.docx"))
 
 #### Table S8 (experience linear vs. quadratic vs. breakpoint, 1996-2025) ####
 
@@ -1368,7 +1369,7 @@ aic_table_exp_1996_2025 <- flextable(aic_table_exp_1996_2025) %>%
        part = "body"); aic_table_exp_1996_2025
 
 #save final table
-save_as_docx(aic_table_exp_1996_2025, path = "./TablesFigures/1996_2025_Experience_Predictor_Comparison.docx")
+save_as_docx(aic_table_exp_1996_2025, path = here("TablesFigures", "1996_2025_Experience_Predictor_Comparison.docx"))
 
 ############ Table S9 (experience linear vs. quadratic vs. breakpoint, 2016-2023) ##################
 
@@ -1425,7 +1426,7 @@ aic_table_exp_2016_2023 <- flextable(aic_table_exp_2016_2023) %>%
        part = "body"); aic_table_exp_2016_2023
 
 #save final table
-save_as_docx(aic_table_exp_2016_2023, path = "./TablesFigures/2016_2023_Experience_Predictor_Comparison.docx")
+save_as_docx(aic_table_exp_2016_2023, path = here("TablesFigures", "2016_2023_Experience_Predictor_Comparison.docx"))
 
 #### Table S10 (age threshold comparison) ####
 
@@ -1478,7 +1479,7 @@ age_threshold_comparison_ft <- flextable(age_threshold_comparison_tbl) %>%
   align(align = "center", part = "all") %>%
   bold(i = which(age_threshold_comparison_tbl$Threshold == best_age_threshold), part = "body"); age_threshold_comparison_ft
 
-save_as_docx(age_threshold_comparison_ft, path = "./TablesFigures/AIC_Age_Threshold_Comparison.docx")
+save_as_docx(age_threshold_comparison_ft, path = here("TablesFigures", "AIC_Age_Threshold_Comparison.docx"))
 
 #### Table S11 (experience threshold comparison) ####
 
@@ -1530,7 +1531,7 @@ exp_threshold_comparison_ft <- flextable(exp_threshold_comparison_tbl) %>%
   align(align = "center", part = "all") %>%
   bold(i = which(exp_threshold_comparison_tbl$Threshold == best_threshold), part = "body"); exp_threshold_comparison_ft
 
-save_as_docx(exp_threshold_comparison_ft, path = "./TablesFigures/AIC_Experience_Threshold_Comparison.docx")
+save_as_docx(exp_threshold_comparison_ft, path = here("TablesFigures", "AIC_Experience_Threshold_Comparison.docx"))
 
 #### Figure S2 (variation in pupping experience within ages) ####
 
@@ -1580,7 +1581,7 @@ plot_variation_exp <- ggplot(model_variables,
   labs(x = "Maternal age (years)",
        y = "Previous pupping experience (number of pups)"); plot_variation_exp
 
-ggsave("./TablesFigures/FigureS2.png", plot_variation_exp, width = 8, height = 6, dpi = 600)
+ggsave(here("TablesFigures", "FigureS2.png"), plot_variation_exp, width = 8, height = 6, dpi = 600)
 
 #### Figure S3 (age threshold significance comparison) ####
 
@@ -1636,7 +1637,7 @@ age_threshold_comparison_figure <- ggplot(thr_res_age, aes(age_cutoff, coef)) +
        y = "Estimated old slope (log-odds)") +
   theme_classic(); age_threshold_comparison_figure
 
-ggsave("./TablesFigures/FigureS3.png", age_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
+ggsave(here("TablesFigures","FigureS3.png"), age_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
 
 ###################### Figure S4 (experience threshold significance comparison) ############################
 
@@ -1692,5 +1693,5 @@ experience_threshold_comparison_figure <- ggplot(thr_res_exp, aes(exp_cutoff, co
        y = "Estimated experienced slope (log-odds)") +
   theme_classic(); experience_threshold_comparison_figure
 
-ggsave("./TablesFigures/FigureS4.png", experience_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
+ggsave(here("TablesFigures", "FigureS4.png"), experience_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
 
