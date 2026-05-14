@@ -59,7 +59,9 @@ tide_data_clean <- tide_data_all %>%
   select("Date", "time_GMT", "tide_height", "season") %>%
   mutate(tide_datetime = as.POSIXct(paste(Date, time_GMT),
                                     format = "%Y-%m-%d %H:%M",
-                                    tz = "UTC"))
+                                    tz = "UTC")) %>%
+  mutate(tide_datetime = format(tide_datetime,
+                                "%Y-%m-%d %H:%M:%S"))
 
 #### 2) Read in and clean wave data ####
 
@@ -102,7 +104,10 @@ wave_data_clean <- wave_data_all %>%
          wave_datetime = as.POSIXct(sprintf("%04d-%02d-%02d %02d:00:00",
                                             YY, MM, DD, hh),
                                     format = "%Y-%m-%d %H:%M:%S",
-                                    tz = "UTC"))
+                                    tz = "UTC")) %>%
+  mutate(wave_datetime = format(wave_datetime,
+                                "%Y-%m-%d %H:%M:%S"))
+
 
 #### 3) Save processed CSVs ####
 

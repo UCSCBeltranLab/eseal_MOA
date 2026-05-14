@@ -8,7 +8,15 @@ library(conflicted)
 library(tidyverse)
 library(lubridate)
 
-conflicts_prefer(dplyr::lag)
+# Prefer dplyr for common conflicts
+conflict_prefer("filter", "dplyr")
+conflict_prefer("select", "dplyr")
+conflict_prefer("rename", "dplyr")
+conflict_prefer("mutate", "dplyr")
+conflict_prefer("summarize", "dplyr")
+conflict_prefer("arrange", "dplyr")
+conflict_prefer("count", "dplyr")
+conflict_prefer("lag", "dplyr")
 
 # read in tide data
 tide_data_clean <- read_csv(here("IntermediateData", "tide_data_processed.csv"), show_col_types = FALSE)
@@ -20,7 +28,7 @@ wave_data_clean <- read_csv(here("IntermediateData", "wave_data_processed.csv"),
 seal_density_data <- read_csv(here("IntermediateData", "seal_density.csv"), show_col_types = FALSE)
 
 # read in seal density data
-weaner_data <- read_csv(here("RawData", "weanling_weight_master.csv"), show_col_types = FALSE)
+weaner_data <- read_csv(here("RawData", "weaner_weighing_data.csv"), show_col_types = FALSE)
 
 # read in the raw resight data
 # includes animalID, season, date, area, entry date, entry = observer, withpup = pup status of the observed female (0,1,2,etc.)
@@ -207,36 +215,31 @@ area_density <- area_density %>%
 
 ##necessary filtering
 weaner_data <- weaner_data %>% 
-  rename(pupID = animalID) %>%
-  filter(!is.na(MomAnimalID)) %>% #only known moms
-  filter(!is.na(year)) #only known years
+  filter(!is.na(animalID)) %>% #only known moms
+  filter(!is.na(season)) #only known years
 
 ##what does the sample size look like?
-n_distinct(weaner_data$MomAnimalID)
-n_distinct(weaner_data$year)
+n_distinct(weaner_data$animalID)
+n_distinct(weaner_data$season)
 
 ##are there duplicates (1 mom with 2 pup weight measurements in the same year)
 wean_dup_cases <- weaner_data %>%
-  count(MomAnimalID, year) %>%
+  count(animalID, season) %>%
   filter(n > 1)
 
 ##why are there duplicates (weighed same pup twice? 2 different pups?)
 wean_dup_rows <- weaner_data %>%
-  semi_join(wean_dup_cases, by = c("MomAnimalID", "year")) %>%
-  arrange(MomAnimalID, year)
+  semi_join(wean_dup_cases, by = c("animalID", "season")) %>%
+  arrange(animalID, season)
 
 # 3) filter wean weight data
 weaner_data <- weaner_data %>%
-  select(MomAnimalID, pupID, sex, year, Wt, weighingdate, weandate) %>%
-  rename(animalID = MomAnimalID,
-         season = year) %>%
   mutate(weighingdate = as.Date(weighingdate),
          weandate = as.Date(weandate),
          days_post_wean = as.numeric(weighingdate - weandate)) %>% #calculate the number of days between weaning and weighing
   filter(days_post_wean >= 0) %>% #only animals weighed as actual weans
   filter(days_post_wean <= 71) %>% #excluding wildly wrong wean dates
-  mutate(Wt_wean_corrected = Wt * exp(0.00596 * days_post_wean)) %>% #back-correction for wean mass based on fasting rate
-  filter(Wt_wean_corrected <= 170) #no super weaners
+  mutate(Wt_wean_corrected = Wt * exp(0.00596 * days_post_wean)) #back-correction for wean mass based on fasting rate
 
 ##check the remaining duplicates (all the same pup weighed twice post-weaning)
 final_wean_duplicates <- weaner_data %>%
@@ -261,5 +264,3 @@ processed_data <- metadata %>%
 
 ##write final CSV for all modeling variables
 write.csv(processed_data, here("IntermediateData", "MOA_data_pull.csv"), row.names = FALSE, na = "NA")
-
-          
