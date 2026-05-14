@@ -45,6 +45,7 @@ raw_data %>%
   mutate(date = as.Date(date)) %>%
   summarise(n_seals = n_distinct(animalID), n_sightings = n())
 
+#how many sightings have withpup not 0 or 1
 raw_data %>%
   filter(!(withpup %in% c(0, 1))) %>%
   summarize(n_obs = n())
@@ -239,7 +240,7 @@ weaner_data <- weaner_data %>%
          days_post_wean = as.numeric(weighingdate - weandate)) %>% #calculate the number of days between weaning and weighing
   filter(days_post_wean >= 0) %>% #only animals weighed as actual weans
   filter(days_post_wean <= 71) %>% #excluding wildly wrong wean dates
-  mutate(Wt_wean_corrected = Wt * exp(0.00596 * days_post_wean)) #back-correction for wean mass based on fasting rate
+  mutate(Wt_wean_corrected = Wt * exp(0.00596 * days_post_wean)) #back-correction for wean mass based on fasting rate (B. J. Le Boeuf & Crocker, 2005)
 
 ##check the remaining duplicates (all the same pup weighed twice post-weaning)
 final_wean_duplicates <- weaner_data %>%
