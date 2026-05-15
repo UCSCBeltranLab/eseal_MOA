@@ -12,7 +12,7 @@ beaches <- st_read(here("RawData", "ANM map/Ano Nuevo Map Final.shp"), quiet = T
   select(-id)
 
 # save beaches as a geopackage too
-st_write(beaches, here("RawData", "beaches.gpkg"), delete_dsn = TRUE)
+st_write(beaches, here("IntermediateData", "beaches.gpkg"), delete_dsn = TRUE)
 
 # read in Picterra seal detections -------------------------------------------
 
@@ -61,5 +61,5 @@ picterra.output <- do.call(rbind, picterra.list)
 # save merged Picterra polygons ----------------------------------------------
 
 # save merged polygons as a geopackage
-st_write(picterra.output, here("RawData", "merged_polygons.gpkg"), delete_dsn = TRUE)
+st_write(picterra.output, here("IntermediateData", "merged_polygons.gpkg"), delete_dsn = TRUE)
 

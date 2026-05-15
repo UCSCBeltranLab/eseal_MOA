@@ -302,7 +302,7 @@ conceptual_MOA_plot <- ggplot(MOA_plot_df, aes(date, 1, fill = pup_status)) +
         legend.position = "top",
         legend.title = element_text(face = "bold", size = 19)); conceptual_MOA_plot
 
-ggsave(here("TablesFigures", "MOA_plot_conceptual.png"), conceptual_MOA_plot, height = 7, width = 15, dpi = 1000)
+ggsave(here("TablesFigures", "Figure1a.png"), conceptual_MOA_plot, height = 7, width = 15, dpi = 1000)
 
 #### Figure 1b (MOA distribution across years) ####
 
@@ -351,7 +351,7 @@ MOA_distribution_years <- ggplot(MOA_percent_data,
         legend.position = "left",
         legend.justification = "top"); MOA_distribution_years
 
-ggsave(here("TablesFigures", "MOA_distribution_years.png"), MOA_distribution_years, height = 7, width = 17, dpi = 1000)
+ggsave(here("TablesFigures", "Figure1b.png"), MOA_distribution_years, height = 7, width = 17, dpi = 1000)
 
 #### Figure 2a (breakpoint age, 1996-2025) ####
 
@@ -750,7 +750,7 @@ ggsave(here("TablesFigures", "Figure2.png"), plot_age_exp, width = 17, height = 
 #### Figure 3a (density conceptual map) ####
 
 # 1) Read beaches geopackage
-beaches <- st_read(here("RawData", "beaches.gpkg"), quiet = TRUE)
+beaches <- st_read(here("IntermediateData", "beaches.gpkg"), quiet = TRUE)
 
 # 2) Read density data
 seal_density <- read_csv(here("IntermediateData", "seal_density.csv"), show_col_types = FALSE)

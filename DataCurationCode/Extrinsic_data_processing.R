@@ -120,10 +120,10 @@ write.csv(wave_data_clean, here("IntermediateData", "wave_data_processed.csv"), 
 #### 1) Read spatial data ####
 
 # read merged Picterra seal detection polygons
-picterra.output <- st_read(here("RawData", "merged_polygons.gpkg"), quiet = TRUE)
+picterra.output <- st_read(here("IntermediateData", "merged_polygons.gpkg"), quiet = TRUE)
 
 # read Año Nuevo beach polygons
-beaches <- st_read(here("RawData", "beaches.gpkg"), quiet = TRUE)
+beaches <- st_read(here("IntermediateData", "beaches.gpkg"), quiet = TRUE)
 
 #### 2) Convert to NAD83 / California zone 3 ####
 
