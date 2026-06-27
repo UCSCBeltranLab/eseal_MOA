@@ -18,6 +18,9 @@ conflict_prefer("arrange", "dplyr")
 conflict_prefer("count", "dplyr")
 conflict_prefer("lag", "dplyr")
 
+#all data for tides are available to upload at: https://tidesandcurrents.noaa.gov/waterlevels.html?id=9413450
+#all data for wave metrics are available to upload at: https://www.ndbc.noaa.gov/station_history.php?station=46042
+
 # read in tide data
 tide_data_clean <- read_csv(here("IntermediateData", "tide_data_processed.csv"), show_col_types = FALSE)
 
@@ -27,16 +30,11 @@ wave_data_clean <- read_csv(here("IntermediateData", "wave_data_processed.csv"),
 # read in seal density data
 seal_density_data <- read_csv(here("IntermediateData", "seal_density.csv"), show_col_types = FALSE)
 
-# read in seal density data
-weaner_data <- read_csv(here("RawData", "weaner_weighing_data.csv"), show_col_types = FALSE)
+# read in wean mass data
+weaner_data <- read_csv(here("IntermediateData", "wean_mass_data.csv"), show_col_types = FALSE)
 
-# read in the raw resight data
-# includes animalID, season, date, area, entry date, entry = observer, withpup = pup status of the observed female (0,1,2,etc.)
-raw_data <- read_csv(here("RawData", "Aditi 2024 Data Pull 2025_04_17_RAW.csv"), show_col_types = FALSE)
-
-# read in summarized individual seal data
-# specific per-animal data: includes animalID, age, season, pup birth date with precision
-summarized_data <- read_csv(here("RawData", "Aditi 2024 Data Pull 2025_04_17_SUMMARIZED.csv"), show_col_types = FALSE)
+# read in raw resight data
+raw_data <- read_csv(here("IntermediateData", "resight_data.csv"), show_col_types = FALSE)
 
 # Resight data processing -----------------------------------
 
@@ -45,18 +43,14 @@ raw_data %>%
   mutate(date = as.Date(date)) %>%
   summarise(n_seals = n_distinct(animalID), n_sightings = n())
 
-#how many sightings have withpup not 0 or 1
-raw_data %>%
-  filter(!(withpup %in% c(0, 1))) %>%
-  summarize(n_obs = n())
-
-##clean the raw resight data
+##clean raw data
 raw_data <- raw_data %>%
-  arrange(animalID) %>%
+  mutate(date = as.Date(date)) %>%
+  filter(withpup %in% c(0, 1)) %>% # remove uncertain pup-status observations
   group_by(animalID, date) %>%
-  slice_min(order_by = entry, n = 1, with_ties = FALSE) %>% #gets rid of double resights
-  filter(withpup %in% c(0, 1)) %>% #restrict to only values of withhpup score = 0 or 1 (either was not seen with a pup or was seen with 1 pup)
-  ungroup() 
+  mutate(withpup = as.integer(any(withpup == 1))) %>% #day = withpup 1 if seen with pup at least once on a day (was associated on that day)
+  slice(1) %>% # keep one representative row per female-day
+  ungroup()
 
 ### Calculate previous pupping experience from the raw data ###
 
@@ -73,16 +67,10 @@ pupping_experience <- raw_data %>%
 raw_data <- raw_data %>%
   left_join(pupping_experience, by = c("animalID", "season"))
 
-##create a metadata table combining summarized and raw data
-metadata <- summarized_data %>%
-  left_join(raw_data, by = c("animalID", "season"))
-
 #filter metadata so it only includes precise birth_dates and removes weird animals
-metadata <- metadata %>%
-  rename(age = AgeYears) %>%
-  rename(birth_date = BirthDate) %>%
+metadata <- raw_data %>%
   filter(!is.na(birth_date)) %>% # only known birth_date moms
-  filter(Precision <= 7) %>% # pup birth_date precision within a week
+  filter(precision <= 7) %>% # pup birth_date precision within a week
   filter(age <= 24) # removes animals outside of normal age range
 
 ### Resight effort and set up for calculating mother-offspring association ###
@@ -95,6 +83,17 @@ metadata <- metadata %>%
          count_1_pup = sum(withpup == 1 & date >= birth_date, na.rm = TRUE)) %>% # post-birth 1-pup sightings
   filter(total_resights >= 14) %>% # keep only animals with ≥14 observations post birth
   ungroup()
+
+#### *Calculate mother-offspring association* ####
+
+# mother-offspring association = 
+# count_1_pup (number of days observed with 1 pup during lactation) / total_resights (total days observed during lactation)
+
+metadata <- metadata %>%
+  mutate(MOA_proportion = count_1_pup / total_resights) %>%
+  mutate(date = as.Date(date),
+         birth_date = as.Date(birth_date)) %>%
+  filter(!is.na(MOA_proportion), MOA_proportion>0) #ensure valid association values
 
 ### Assigning each female pupping beach locations ###
 
@@ -164,12 +163,9 @@ ggplot(tide_wave_flagged, aes(x = season, y = n_extreme_both)) +
        y = "Number of Extreme Events") +
   theme_minimal()
 
- # Conspecific density data processing -----------------------------------------
+ # Seal density data processing -----------------------------------------
 
-# 1) extract year (YYYY) from date string and store as season to match the resight data
-seal_density_data$season <- as.integer(substr(seal_density_data$date, 1, 4))
-
-# 2a) Calculate average density per area-season for modeling, then link to assigned harems
+# 1a) Calculate average density per area-season for modeling, then link to assigned harems
 area_density <- seal_density_data %>%
   rename(dominant_area = Beach) %>%
   group_by(dominant_area, season) %>%
@@ -178,7 +174,7 @@ area_density <- seal_density_data %>%
   left_join(harem_assignment, by = c("season", "dominant_area")) %>% #join with location info per animal
   filter(!is.na(animalID)) #only keep animals observed in the 2016-2025 dataset to match the drone data
 
-# 2b) Data for plot below (one row per beach x season)
+# 1b) Data for plot below (one row per beach x season)
 area_density_plot <- area_density %>%
   group_by(dominant_area, season) %>%
   summarize(avg_density = first(avg_density),
@@ -199,14 +195,14 @@ ggplot(area_density_plot, aes(x = dominant_area,
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-# 3) Clean up the area density data
+# 2) Clean up the area density data
 # Identify animal-season cases with multiple locations (ties)
 location_duplicates <- area_density %>%
   group_by(season, animalID) %>%
   filter(n() > 1) %>%
   arrange(animalID, season)
 
-# Break ties for the 17 duplicates by selecting the location with higher average density
+# 3) Break ties for the 17 duplicates by selecting the location with higher average density
 area_density <- area_density %>%
   group_by(season, animalID) %>%
   slice_max(avg_density, with_ties = FALSE) %>%
@@ -257,7 +253,8 @@ weaner_data <- weaner_data %>%
 
 ##make table with all necessary variables for analyses and figures
 processed_data <- metadata %>%
-  select(animalID, season, age, date, birth_date, pupping_exp, withpup, total_resights, count_1_pup) %>%
+  select(animalID, season, age, birth_date, pupping_exp, total_resights, count_1_pup, MOA_proportion) %>%
+  distinct(animalID, season, .keep_all = TRUE) %>% #only 1 row per animalID-season
   mutate(birth_date = as.Date(birth_date)) %>%
   left_join(area_density %>% select(animalID, season, dominant_area, avg_density), by = c("animalID", "season")) %>%
   left_join(tide_wave_flagged %>% select(season, n_extreme_both), by = "season") %>%
@@ -265,3 +262,4 @@ processed_data <- metadata %>%
 
 ##write final CSV for all modeling variables
 write.csv(processed_data, here("IntermediateData", "MOA_data_pull.csv"), row.names = FALSE, na = "NA")
+

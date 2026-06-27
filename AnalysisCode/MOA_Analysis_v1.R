@@ -16,6 +16,7 @@ lapply(
     
     # plotting
     "ggthemes",
+    "ggeffects",
     "cowplot",
     "viridis",
     "ggtext",
@@ -51,37 +52,22 @@ conflict_prefer("count", "dplyr")
 set.seed(123)
 nsim <- 100 # keep 100 simulations
 
-### Read modeling variables csv ###
+### Get modeling variables from data pull csv ###
 
-data_pull <- read_csv(here("IntermediateData", "MOA_data_pull.csv"), show_col_types = FALSE)
-
-#### Calculate mother-offspring association ####
-
-# mother-offspring association = 
-# count_1_pup (number of days observed with 1 pup during lactation) / total_resights (total days observed during lactation)
-
-data_pull <- data_pull %>%
-  mutate(MOA_proportion = count_1_pup / total_resights) %>%
-  mutate(date = as.Date(date),
-         birth_date = as.Date(birth_date)) %>%
-  filter(!is.na(MOA_proportion), MOA_proportion>0) #ensure valid association values
-
-### Collapse to 1 row per seal-season for modeling ###
-
-model_variables <- data_pull %>%
-  distinct(animalID, season, .keep_all = TRUE)
+model_variables <- read_csv(here("IntermediateData", "MOA_data_pull.csv"), show_col_types = FALSE)
   
-##Setting age threshold and experience threshold (see Tables S10 and S11)
-age_thresh <- 9
+##Setting age threshold and experience threshold (see Tables S6 and S7)
+age_thresh <- 8
+
 exp_thresh <- 5
   
 ##Setting thresholds in data
 model_variables <- model_variables %>%
-  mutate(age_cat = factor(ifelse(age < age_senesce, "Young", "Old"),
-                            levels = c("Young", "Old"))) %>%
-  mutate(age10 = (age - age_senesce) / 10) %>% #scaled numeric version of age centered at the threshold
+  mutate(age_cat = factor(ifelse(age < age_thresh, "Young", "Old"),
+                          levels = c("Young", "Old"))) %>%
+  mutate(age10 = (age - age_thresh) / 10) %>% #scaled numeric version of age centered at the threshold
   mutate(experience_cat = factor(ifelse(pupping_exp < exp_thresh, "Inexperienced", "Experienced"),
-                        levels = c("Inexperienced", "Experienced"))) %>%
+                                 levels = c("Inexperienced", "Experienced"))) %>%
   mutate(exp10 = (pupping_exp - exp_thresh) / 10) %>% #scaled numeric version of previous pupping experience centered at the threshold
   mutate(animalID_fct = factor(animalID), #animalID factor
          season_fct = factor(season)) #season factor
@@ -93,6 +79,8 @@ data_summary <- model_variables %>%
     n_season = n_distinct(season),
     min_age = min(age),
     max_age = max(age),
+    min_exp = min(pupping_exp),
+    max_exp = max(pupping_exp),
     mean_MOA = mean(MOA_proportion),
     sd_MOA = sd(MOA_proportion),
     min_MOA = min(MOA_proportion),
@@ -114,98 +102,19 @@ cor(vars, use = "pairwise.complete.obs", method = "pearson")
 
 # MODELING FRAMEWORK --------------------
 
-# For Models 1a/1b and 2a/2b the response is MOA as a proportion in (0,1] (where successes = the number of observations a mother was seen with 1 pup)
-# All models are a binomial with logit link, weighted by the total observations (weights = total_resights)
+# Model 1 is an LMM with weaning mass as the response (continuous/normal)
+# Models 2a/2b and 3a/3b are GLMMs where the response is MOA as a proportion in (0,1] (where successes = the number of observation days a mother was seen with 1 pup)
+# All MOA response models are a binomial with logit link, weighted by the total observations (weights = total_resights)
 # We use bobyqa as a robust optimizer to improve model convergence
 # Random effects for animalID and season are included
 
-## Model 1a includes age, conspecific density, and extreme wave and tide events using a smaller subset of data (2016-2023)
-## Model 1b includes previous pupping experience, conspecific density, and extreme wave and tide events using a smaller subset of data (2016-2023)
+## Model 1 includes mother-offspring association and maternal age as predictors
 ## Model 2a is a piecewise segmented regression for age using the full dataset (1996-2025)
-## Model 2b is a piecewise segmented regression for previous pupping experience using the full dataset (1996-2025)
+## Model 2b includes age, seal density, and extreme wave and tide events using a smaller subset of data (2016-2023)
+## Model 3a is a piecewise segmented regression for previous pupping experience using the full dataset (1996-2025)
+## Model 3b includes previous pupping experience, seal density, and extreme wave and tide events using a smaller subset of data (2016-2023)
 
-#### Model 1a: 2016-2023 subset model with age, density, extreme ####
-
-#make subset dataframe for the 2016-2023 models and figures (makes code for figures easier)
-model_variables_2016_2023 <- model_variables %>%
-  filter(!is.na(n_extreme_both)) %>% #no NAs
-  filter(!is.na(avg_density)) %>% #no NAs
-  mutate(season_fct = droplevels(season_fct))
-
-## model for 2016-2023 subset to test all predictors together
-## age = maternal age as a linear predictor
-## avg_density = conspecific density of each seal's observed location 
-## n_extreme_both = the number of per-year extreme wave and tide events
-## random effects of animalID and year
-
-# 2) all predictors model
-mod_age_2016_2023 <- glmer(MOA_proportion ~ age + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                             weights = total_resights,
-                             family = binomial(link = "logit"),
-                             control = glmerControl(optimizer = "bobyqa"),
-                             data = model_variables_2016_2023); summary(mod_age_2016_2023)
-
-ranef(mod_age_2016_2023) #random effect variance for each animalID and season
-exp(fixef(mod_age_2016_2023)) #converts fixed-effect log-odds to odds ratios
-simulateResiduals(mod_age_2016_2023, plot = TRUE) #plot residuals
-check_collinearity(mod_age_2016_2023) #check predictor VIFs
-
-#### Model 1b:  2016-2023 subset model with pupping experience, density, extreme ####
-
-## pupping_exp = number of prior breeding seasons observed at least once with a pup
-## avg_density = conspecific density of each seal's observed location 
-## n_extreme_both = the number of per-year extreme wave and tide events
-## random effects of animalID and year
-
-mod_exp_2016_2023 <- glmer(MOA_proportion ~ pupping_exp + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                 weights = total_resights,
-                                 family = binomial(link = "logit"),
-                                 control = glmerControl(optimizer = "bobyqa"),
-                                 data = model_variables_2016_2023); summary(mod_exp_2016_2023) #model summary
-
-ranef(mod_exp_2016_2023) #random effect variance for each animalID and season
-exp(fixef(mod_exp_2016_2023)) #converts fixed-effect log-odds to odds ratios
-simulateResiduals(mod_exp_2016_2023, plot = TRUE) #plot residuals
-check_collinearity(mod_exp_2016_2023) #check predictor VIFs
-
-#### Model 2a: 1996-2025 full dataset model for age ####
-
-## breakpoint model for age
-## age_cat = "Young", "Old" based on age_senesce
-## age10 = (age - age_senesce) / 10) scaled numeric version of age centered at senescence threshold
-## random effects of animalID and year
-
-mod_age_1996_2025 <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
-                           weights = total_resights,
-                           family = binomial(link = "logit"),
-                           control = glmerControl(optimizer = "bobyqa"),
-                           data = model_variables); summary(mod_age_1996_2025)
-
-ranef(mod_age_1996_2025) #random effect variance for each animalID and season
-exp(fixef(mod_age_1996_2025)) #converts fixed-effect log-odds to odds ratios
-resid_age <- simulateResiduals(mod_age_1996_2025, plot = TRUE) #plot residuals
-plotResiduals(resid_age, form = model_variables$age_cat) #age cat residuals
-
-#### Model 2b: 1996-2025 full dataset model for pupping experience ####
-
-## breakpoint model for experience
-## experience_cat = "inexperienced" or "experienced", based on <5 or >= 5
-## exp10 = (pupping_exp - 5) / 10) scaled numeric version of experience centered at the threshold
-## random effects of animalID and year
-
-# 2) Fit pupping experience model
-mod_exp_1996_2025 <- glmer(MOA_proportion ~ experience_cat : exp10 + (1 | animalID_fct) + (1 | season_fct),
-                           weights = total_resights,
-                           family = binomial(link = "logit"),
-                           control = glmerControl(optimizer = "bobyqa"),
-                           data = model_variables); summary(mod_exp_1996_2025)
-
-ranef(mod_exp_1996_2025) #random effect variance for each animalID and season
-exp(fixef(mod_exp_1996_2025)) #converts fixed-effect log-odds to odds ratios
-resid_exp <- simulateResiduals(mod_exp_1996_2025, plot = TRUE) #plot residuals
-plotResiduals(resid_exp, form = model_variables$experience_cat) #experience cat residuals
-
-#### Model 3: Offspring fitness consequences ####
+#### Model 1: Offspring fitness consequences ####
 
 ## linear model for weaning mass against mother-offspring association
 ## age = maternal age
@@ -227,19 +136,110 @@ ranef(mod_wean_mass) #random effect variance for each animalID and season
 simulateResiduals(mod_wean_mass, plot = TRUE) #plot residuals
 check_collinearity(mod_wean_mass) #check predictor VIFs
 
+#### Model 2a: 1996-2025 full dataset model for age ####
+
+## breakpoint model for age
+## age_cat = "Young", "Old" based on age_senesce
+## age10 = (age - age_senesce) / 10) scaled numeric version of age centered at senescence threshold
+## random effects of animalID and year
+
+mod_age_1996_2025 <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
+                           weights = total_resights,
+                           family = binomial(link = "logit"),
+                           control = glmerControl(optimizer = "bobyqa"),
+                           data = model_variables); summary(mod_age_1996_2025)
+
+ranef(mod_age_1996_2025) #random effect variance for each animalID and season
+exp(fixef(mod_age_1996_2025)) #converts fixed-effect log-odds to odds ratios
+resid_age <- simulateResiduals(mod_age_1996_2025, plot = TRUE) #plot residuals
+plotResiduals(resid_age, form = model_variables$age_cat) #age cat residuals
+
+#### Model 2b: 2016-2023 subset model with age, density, extreme ####
+
+#make subset dataframe for the 2016-2023 models and figures
+model_variables_2016_2023 <- model_variables %>%
+  filter(!is.na(n_extreme_both)) %>% #no NAs
+  filter(!is.na(avg_density)) %>% #no NAs
+  mutate(season_fct = droplevels(season_fct))
+
+## model for 2016-2023 subset to test all predictors together
+## age = maternal age as a linear predictor
+## avg_density = Seal density of each seal's observed location 
+## n_extreme_both = the number of per-year extreme wave and tide events
+## random effects of animalID and year
+
+# 2) all predictors model
+mod_age_2016_2023 <- glmer(MOA_proportion ~ age + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                           weights = total_resights,
+                           family = binomial(link = "logit"),
+                           control = glmerControl(optimizer = "bobyqa"),
+                           data = model_variables_2016_2023); summary(mod_age_2016_2023)
+
+ranef(mod_age_2016_2023) #random effect variance for each animalID and season
+exp(fixef(mod_age_2016_2023)) #converts fixed-effect log-odds to odds ratios
+simulateResiduals(mod_age_2016_2023, plot = TRUE) #plot residuals
+check_collinearity(mod_age_2016_2023) #check predictor VIFs
+
+#### Model 3a: 1996-2025 full dataset model for pupping experience ####
+
+## breakpoint model for experience
+## experience_cat = "inexperienced" or "experienced", based on <5 or >= 5
+## exp10 = (pupping_exp - 5) / 10) scaled numeric version of experience centered at the threshold
+## random effects of animalID and year
+
+# 2) Fit pupping experience model
+mod_exp_1996_2025 <- glmer(MOA_proportion ~ experience_cat : exp10 + (1 | animalID_fct) + (1 | season_fct),
+                           weights = total_resights,
+                           family = binomial(link = "logit"),
+                           control = glmerControl(optimizer = "bobyqa"),
+                           data = model_variables); summary(mod_exp_1996_2025)
+
+ranef(mod_exp_1996_2025) #random effect variance for each animalID and season
+exp(fixef(mod_exp_1996_2025)) #converts fixed-effect log-odds to odds ratios
+resid_exp <- simulateResiduals(mod_exp_1996_2025, plot = TRUE) #plot residuals
+plotResiduals(resid_exp, form = model_variables$experience_cat) #experience cat residuals
+
+#### Model 3b:  2016-2023 subset model with pupping experience, density, extreme ####
+
+## pupping_exp = number of prior breeding seasons observed at least once with a pup
+## avg_density = Seal density of each seal's observed location 
+## n_extreme_both = the number of per-year extreme wave and tide events
+## random effects of animalID and year
+
+mod_exp_2016_2023 <- glmer(MOA_proportion ~ pupping_exp + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                           weights = total_resights,
+                           family = binomial(link = "logit"),
+                           control = glmerControl(optimizer = "bobyqa"),
+                           data = model_variables_2016_2023); summary(mod_exp_2016_2023) #model summary
+
+ranef(mod_exp_2016_2023) #random effect variance for each animalID and season
+exp(fixef(mod_exp_2016_2023)) #converts fixed-effect log-odds to odds ratios
+simulateResiduals(mod_exp_2016_2023, plot = TRUE) #plot residuals
+check_collinearity(mod_exp_2016_2023) #check predictor VIFs
+
 # MAIN FIGURES ----------------------------------------------
+
+#NOTE: this plot is created using data from the full dataframe (metadata), so you need to run MOA_data_processing to recreate
 
 #### Figure 1a (MOA conceptual figure) ####
 
-# 1) Choose 3 seal mothers from 2024
-example_ids <- c("44397", "48257", "51872") #example seal IDs
+# 1) Choose 3 seal mothers from 2025
+example_ids <- c("36985", "50634", "51527") #example seal IDs
 
-# 2) Build resight tiles
-resight_tiles <- data_pull %>%
+#read raw near-daily resight data
+resight_tiles <- read_csv(here("IntermediateData", "resight_data.csv"), show_col_types = FALSE)
+
+#join to mother-offspring association values for mothers in our dataset
+resight_tiles <- resight_tiles %>%
+  left_join(model_variables %>% select(-any_of(names(resight_tiles)[!names(resight_tiles) %in% c("animalID", "season")])),
+            by = c("animalID", "season"))
+
+# 2) Build resight tiles from metadata (from MOA_data_processing.R)
+resight_tiles <- resight_tiles %>%
   mutate(date = as.Date(date), #convert resight date
          birth_date = as.Date(birth_date), #convert approximate birth date
          withpup = as.character(withpup)) %>% #make withpup character for labels
-  filter(season == 2024, #keep 2024 season
+  filter(season == 2025, #keep 2024 season
          animalID %in% example_ids, #keep example mothers
          !is.na(date), #remove missing resight dates
          !is.na(withpup)) %>% #remove missing pup status
@@ -276,16 +276,17 @@ conceptual_MOA_plot <- ggplot(MOA_plot_df, aes(date, 1, fill = pup_status)) +
   geom_text(data = filter(MOA_plot_df, withpup %in% c("0", "1")), #0/1 labels on observed tiles
             aes(label = withpup),
             size = 5,
+            color = "white",
             fontface = "bold") +
   facet_grid(panel_lab ~ ., switch = "y") + #one row per mother
   scale_fill_manual(name = "Pup status", #legend with written-out categories
-                    values = c("Observed with no pup" = "#8fd0eb",
-                               "Approximate birth" = "#f2b6c6",
-                               "Observed with one pup" = "#86d37c"),
+                    values = c("Observed with no pup" = "#913161",
+                               "Approximate birth" = "darkgreen",
+                               "Observed with one pup" = "#6F8D41"),
                     drop = FALSE) +
   scale_x_date(breaks = seq(min(MOA_plot_df$date),
                  max(MOA_plot_df$date),
-                 by = "3 days"), #start at first date, breaks every 3 days
+                 by = "4 days"), #start at first date, breaks every 3 days
                date_labels = "%b %d",
                expand = c(0, 0)) +
   scale_y_continuous(breaks = NULL, expand = c(0, 0)) + #remove y-axis
@@ -353,7 +354,45 @@ MOA_distribution_years <- ggplot(MOA_percent_data,
 
 ggsave(here("TablesFigures", "Figure1b.png"), MOA_distribution_years, height = 7, width = 17, dpi = 1000)
 
-#### Figure 2a (breakpoint age, 1996-2025) ####
+#### Figure 2 (offspring weaning mass vs. MOA) ####
+
+#make modeling dataset with only values of MOA with wean weight
+model_variables_wean <- model_variables %>%
+  filter(!is.na(Wt_wean_corrected))
+
+# 1) Predicted effect of mother-offspring association on wean mass
+pred_wean_mass <- ggpredict(mod_wean_mass,
+                            terms = "MOA_proportion")
+
+# 2) Plot model predictions
+plot_wean <- ggplot() +
+  geom_jitter(data = model_variables,
+              aes(x = (MOA_proportion), y = Wt_wean_corrected),
+              size = 1.5,
+              color = "#664388",
+              alpha = 0.45,
+              width = 0.003,
+              height = 0) +
+  geom_ribbon(data = pred_wean_mass,
+              aes(x = x, ymin = conf.low, ymax = conf.high),
+              fill = "black",
+              alpha = 0.18) +
+  geom_line(data = pred_wean_mass,
+            aes(x = x, y = predicted),
+            color = "black",
+            linewidth = 1.3) +
+  coord_cartesian(xlim = range(model_variables_wean$MOA_proportion, na.rm = TRUE)) +
+  labs(x = "Mother-offspring association",
+       y = "Offspring weaning mass (kg)") +
+  theme_classic(base_size = 20); plot_wean
+
+ggsave(here("TablesFigures", "Figure4.png"), plot_wean, width = 10, height = 8, dpi = 800)
+
+#### Figure 3a (breakpoint age, 1996-2025) ####
+
+##Figures for all MOA model predictors use post-stratification to best match model predictions to observed data
+##This means that ...
+
 
 # 1) Set plotting colors for young/old
 AGECOL <- c(Young = "#92BAEE", Old = "#EB99D2")
@@ -377,8 +416,8 @@ observed_data_1996_2025 <- model_variables %>%
 # For each A, keep the full covariate mix of model_variables but overwrite age variables as if everyone were age A
 nd_by_age <- lapply(ages, \(A) transform(model_variables, #start from full dataset to preserve covariate distribution and weights
                                          age = A, #overwrite age so every row is evaluated at age A
-                                         age_cat = factor(ifelse(A < age_senesce, "Young", "Old"), levels = c("Young","Old")), 
-                                         age10 = (A - age_senesce)/10)) 
+                                         age_cat = factor(ifelse(A < age_thresh, "Young", "Old"), levels = c("Young","Old")), 
+                                         age10 = (A - age_thresh)/10)) 
 
 # 5) Post-stratified curve: predict for each age, then compute weighted average using total_resights
 # season = NULL gives overall curve, season ="" forces season RE for thin curves
@@ -411,15 +450,19 @@ boot_1996_2025 <- bootMer(mod_age_1996_2025, FUN = post_curve_overall, nsim = ns
 ci_1996_2025 <- overall_1996_2025 %>%
   mutate(lo = apply(boot_1996_2025$t, 2, quantile, 0.025, na.rm = TRUE), #2.5% quantile at each age
          hi = apply(boot_1996_2025$t, 2, quantile, 0.975, na.rm = TRUE), #97.5% quantile at each age
-         age_cat = factor(ifelse(age < age_senesce, "Young", "Old"), levels = c("Young","Old")), #segment label for each age
+         age_cat = factor(ifelse(age < age_thresh, "Young", "Old"), levels = c("Young","Old")), #segment label for each age
          seg = age_cat) #used to group lines on either side of the threshold in plot
 
 # 9) Add young/old labels to the season-specific lines for correct grouping across the threshold
 season_lines_1996_2025 <- season_lines_1996_2025 %>%
-  mutate(age_cat = factor(ifelse(age < age_senesce, "Young", "Old"), levels = c("Young","Old")), #segment label
+  mutate(age_cat = factor(ifelse(age < age_thresh, "Young", "Old"), levels = c("Young","Old")), #segment label
          seg = age_cat) #keep seg consistent
 
-# 10) Make age plot: thin season curves + bootstrap ribbon + weighted mean line + observed avg points for each age + threshold line + sample size labels
+# 10) Make error bar alpha inversely proportional to sample size
+observed_data_1996_2025 <- observed_data_1996_2025 %>%
+  mutate(error_alpha = scales::rescale(log(n_age), to = c(0.2, 1)))
+
+# 11) Make age plot: thin season curves + bootstrap ribbon + weighted mean line + observed avg points for each age + threshold line + sample size labels
 plot_age_1996_2025 <- ggplot() +
   geom_line(data = season_lines_1996_2025, #thin season-specific curves for context
             aes(age, pred, group = interaction(season_fct, seg)),
@@ -428,20 +471,26 @@ plot_age_1996_2025 <- ggplot() +
   geom_ribbon(data = ci_1996_2025, #bootstrap CI band for overall curve
               aes(age, ymin = lo, ymax = hi, fill = age_cat, group = seg), #separate ribbons on each side of threshold
               alpha = 0.3) +
-  geom_line(data = subset(ci_1996_2025, age < age_senesce),
+  geom_line(data = subset(ci_1996_2025, age < age_thresh),
             aes(age, pred, color = age_cat, group = seg),
             linewidth = 1.5) +
-  geom_line(data = subset(ci_1996_2025, age >= age_senesce),
+  geom_line(data = subset(ci_1996_2025, age >= age_thresh),
             aes(age, pred, color = age_cat, group = seg),
             linewidth = 1.5,
             linetype = "dashed") +
-  geom_pointrange(data = observed_data_1996_2025, #pooled observed points with binomial CI
-                  aes(age, avg_prop, ymin = lwr, ymax = upr),
-                  color = "black") +
-  geom_vline(xintercept = age_senesce - 0.5, linetype = "dashed") +
+  geom_errorbar(data = observed_data_1996_2025,
+                aes(age, ymin = lwr, ymax = upr, alpha = error_alpha),
+                width = 0,
+                color = "black") +
+  geom_point(data = observed_data_1996_2025,
+             aes(age, avg_prop),
+             color = "black",
+             size = 2.5) +
+  scale_alpha_identity() +
+  geom_vline(xintercept = age_thresh - 0.5, linetype = "dashed") +
   annotate("text", 
-           x = age_senesce - 0.5, y = 0.8, 
-           label = "Age threshold (9 years)",
+           x = age_thresh - 0.5, y = 0.8, 
+           label = "Age threshold (8 years)",
            angle = 90, vjust = -0.8, size = 3.5) +
   geom_text(data = observed_data_1996_2025, aes(age, 1.01, label = n_age), vjust = -0.5) + #sample size labels per age
   coord_cartesian(ylim = c(0.75, 1.02), clip = "off") +
@@ -451,10 +500,11 @@ plot_age_1996_2025 <- ggplot() +
   theme_few(base_size = 18) +
   labs(x = "Maternal age (years)", y = "Mother-offspring association"); plot_age_1996_2025
 
-#### Figure 2b (age, 2016-2023) ####
+#### Figure 3b (age, 2016-2023) ####
 
 # 1) Define x-axis ages used in model
 ages_2016_2023 <- sort(unique(model_variables_2016_2023$age)) #unique ages present (x values)
+seasons_2016_2023 <- sort(unique(model_variables_2016_2023$season_fct))
 
 # 2) Compute pooled observed MOA_proportion by age (black points + binomial CIs)
 observed_data_age_2016_2023 <- model_variables_2016_2023 %>%
@@ -502,7 +552,11 @@ ci_age_2016_2023 <- overall_age_2016_2023 %>%
   mutate(lo = apply(boot_age_2016_2023$t, 2, quantile, 0.025, na.rm = TRUE), #lower CI
          hi = apply(boot_age_2016_2023$t, 2, quantile, 0.975, na.rm = TRUE)) #upper CI
 
-# 8) Plot: thin season curves + bootstrap ribbon + mean curve + observed data
+# 8) Make error bar alpha inversely proportional to sample size
+observed_data_age_2016_2023 <- observed_data_age_2016_2023 %>%
+  mutate(error_alpha = scales::rescale(log(n_age), to = c(0.2, 1)))
+
+# 9) Plot: thin season curves + bootstrap ribbon + mean curve + observed data
 plot_age_2016_2023 <- ggplot() +
   geom_line(data = season_lines_age_2016_2023, #thin season-specific curves
             aes(age, pred, group = season_fct),
@@ -514,9 +568,15 @@ plot_age_2016_2023 <- ggplot() +
   geom_line(data = ci_age_2016_2023, #overall predicted curve
             aes(age, pred),
             color = "#D295E3", linewidth = 1.5) +
-  geom_pointrange(data = observed_data_age_2016_2023, #observed pooled MOA_proportions
-                  aes(age, avg_prop, ymin = lwr, ymax = upr),
-                  color = "black") +
+  geom_errorbar(data = observed_data_age_2016_2023,
+                aes(age, ymin = lwr, ymax = upr, alpha = error_alpha),
+                width = 0,
+                color = "black") +
+  geom_point(data = observed_data_age_2016_2023,
+             aes(age, avg_prop),
+             color = "black",
+             size = 2.5) +
+  scale_alpha_identity() +
   geom_text(data = observed_data_age_2016_2023, #sample size labels
             aes(age, 1.01, label = n_age),
             vjust = -0.5) +
@@ -525,7 +585,7 @@ plot_age_2016_2023 <- ggplot() +
   theme_few(base_size = 18) +
   labs(x = "Maternal age (years)", y = "Mother-offspring association"); plot_age_2016_2023
 
-#### Figure 2d (breakpoint pupping experience, 1996-2025)  ####
+#### Figure 3c (breakpoint pupping experience, 1996-2025)  ####
 
 # 1) Colors for inexperienced/experienced
 EXPCOL <- c(Inexperienced = "#9FD46C", Experienced = "#7C82F1")
@@ -548,7 +608,7 @@ observed_exp_data <- model_variables %>%
 # 4) Standardized newdata for each experience E
 nd_by_exp <- lapply(exp_vals, \(E) transform(model_variables,
                                              pupping_exp = E,
-                                             experience_cat = factor(ifelse(E < 5, "Inexperienced", "Experienced"), levels = c("Inexperienced","Experienced")),
+                                             experience_cat = factor(ifelse(E < exp_thresh, "Inexperienced", "Experienced"), levels = c("Inexperienced","Experienced")),
                                              exp10 = (E - 5)/10))
 
 # 5) Post-stratified curve
@@ -589,7 +649,11 @@ season_lines_exp <- season_lines_exp %>%
   mutate(experience_cat = factor(ifelse(pupping_exp < 5, "Inexperienced", "Experienced"), levels = c("Inexperienced","Experienced")),
          seg = experience_cat)
 
-# 10) Plot
+# 10) Make error bar alpha inversely proportional to sample size
+observed_exp_data <- observed_exp_data %>%
+  mutate(error_alpha = scales::rescale(log(n_exp), to = c(0.2, 1)))
+
+# 11) Make experience plot: thin season curves + bootstrap ribbon + weighted mean line + observed avg points for each exp + threshold line + sample size labels
 plot_exp_1996_2025 <- ggplot() +
   geom_line(data = season_lines_exp,
             aes(pupping_exp, pred, group = interaction(season_fct, seg)),
@@ -604,9 +668,15 @@ plot_exp_1996_2025 <- ggplot() +
   geom_line(data = subset(ci_exp, pupping_exp >= 5),
             aes(pupping_exp, pred, color = experience_cat, group = seg),
             linewidth = 1.5) +
-  geom_pointrange(data = observed_exp_data,
-                  aes(pupping_exp, avg_prop, ymin = lwr, ymax = upr),
-                  color = "black") +
+  geom_errorbar(data = observed_exp_data,
+                aes(pupping_exp, ymin = lwr, ymax = upr, alpha = error_alpha),
+                width = 0,
+                color = "black") +
+  geom_point(data = observed_exp_data,
+             aes(pupping_exp, avg_prop),
+             color = "black",
+             size = 2.5) +
+  scale_alpha_identity() +
   geom_vline(xintercept = 5 - 0.5, linetype = "dashed") +
   annotate("text",
            x = 5 - 0.5,
@@ -621,8 +691,7 @@ plot_exp_1996_2025 <- ggplot() +
   theme_few(base_size = 18) +
   labs(x = "Previous pupping experience (number of pups)", y = "Mother-offspring association"); plot_exp_1996_2025
 
-
-#### Figure 2d (pupping experience, 2016-2023) ####
+#### Figure 3d (pupping experience, 2016-2023) ####
 
 # 1) Define x-axis experience values and seasons used for season-specific curves
 exp_vals_2016_2023 <- sort(unique(model_variables_2016_2023$pupping_exp)) #unique experience values present (x values)
@@ -631,7 +700,7 @@ seasons_2016_2023 <- levels(model_variables_2016_2023$season_fct) #season factor
 # 2) Compute pooled observed MOA_proportion by experience (black points + binomial CIs)
 observed_data_exp_2016_2023 <- model_variables_2016_2023 %>%
   group_by(pupping_exp) %>% #group by rows within each experience level
-  summarise(n_experience = n(), #sample size at each experience value for labels
+  summarise(n_exp = n(), #sample size at each experience value for labels
             n_success = sum(count_1_pup, na.rm = TRUE), #total successes
             n_trials = sum(total_resights, na.rm = TRUE), #total effort
             avg_prop = n_success/n_trials, #observed MOA_proportion
@@ -663,8 +732,8 @@ season_lines_exp_2016_2023 <- bind_rows(lapply(seasons_2016_2023, \(S)
 post_curve_exp_overall_2016_2023 <- function(fit) post_curve_exp_2016_2023(fit, season = NULL) #overall curve
 
 overall_exp_2016_2023 <- tibble(pupping_exp = exp_vals_2016_2023,
-                            pred = post_curve_exp_overall_2016_2023(mod_exp_2016_2023)) %>% #mean prediction
-  left_join(observed_data_exp_2016_2023 %>% select(pupping_exp, n_experience), by = "pupping_exp") #add sample sizes
+                                pred = post_curve_exp_overall_2016_2023(mod_exp_2016_2023)) %>% #mean prediction
+  left_join(observed_data_exp_2016_2023 %>% select(pupping_exp, n_exp), by = "pupping_exp") #add sample sizes
 
 boot_exp_2016_2023 <- bootMer(mod_exp_2016_2023, FUN = post_curve_exp_overall_2016_2023,
                           nsim = nsim, type = "parametric", use.u = FALSE) #parametric bootstrap
@@ -674,7 +743,11 @@ ci_exp_2016_2023 <- overall_exp_2016_2023 %>%
   mutate(lo = apply(boot_exp_2016_2023$t, 2, quantile, 0.025, na.rm = TRUE), #lower CI
          hi = apply(boot_exp_2016_2023$t, 2, quantile, 0.975, na.rm = TRUE)) #upper CI
 
-# 8) Plot: thin season curves + bootstrap ribbon + mean curve + observed data
+# 8) Make error bar alpha inversely proportional to sample size
+observed_data_exp_2016_2023 <- observed_data_exp_2016_2023 %>%
+  mutate(error_alpha = scales::rescale(log(n_exp), to = c(0.2, 1)))
+
+# 9) Plot: thin season curves + bootstrap ribbon + mean curve + observed data
 plot_exp_2016_2023 <- ggplot() +
   geom_line(data = season_lines_exp_2016_2023, #thin season-specific curves
             aes(pupping_exp, pred, group = season_fct),
@@ -686,18 +759,24 @@ plot_exp_2016_2023 <- ggplot() +
   geom_line(data = ci_exp_2016_2023, #overall predicted curve
             aes(pupping_exp, pred),
             color = "#2BB295", linewidth = 1.5) +
-  geom_pointrange(data = observed_data_exp_2016_2023, #observed pooled MOA_proportions
-                  aes(pupping_exp, avg_prop, ymin = lwr, ymax = upr),
-                  color = "black") +
+  geom_errorbar(data = observed_data_exp_2016_2023,
+                aes(pupping_exp, ymin = lwr, ymax = upr, alpha = error_alpha),
+                width = 0,
+                color = "black") +
+  geom_point(data = observed_data_exp_2016_2023,
+             aes(pupping_exp, avg_prop),
+             color = "black",
+             size = 2.5) +
+  scale_alpha_identity() +
   geom_text(data = observed_data_exp_2016_2023, #sample size labels
-            aes(pupping_exp, 1.01, label = n_experience),
+            aes(pupping_exp, 1.01, label = n_exp),
             vjust = -0.5) +
   scale_x_continuous(breaks = exp_vals_2016_2023) +
   coord_cartesian(ylim = c(0.65, 1.02), clip = "off") +
   theme_few(base_size = 18) +
   labs(x = "Previous pupping experience (number of pups)", y = "Mother-offspring association"); plot_exp_2016_2023
 
-### Facet Figure 2 Together ###
+### Facet Figure 3 Together ###
 
 # 1) Left column: age plots
 age_plots <- plot_grid(plot_age_1996_2025 +
@@ -737,17 +816,17 @@ exp_plots <- plot_grid(plot_exp_1996_2025 +
                     align = "v") #stack experience figures
 
 # 3) Combine columns
-plot_age_exp <- plot_grid(age_plots, exp_plots,
-                          ncol = 2,
+plot_age_exp <- plot_grid(age_plots, NULL, exp_plots,
+                          ncol = 3,
                           align = "hv",
                           axis = "tblr",
-                          rel_widths = c(1, 1)) #equal column widths
+                          rel_widths = c(1, 0.1, 1)) #equal column widths
 plot_age_exp
 
 # 4) Save figure
 ggsave(here("TablesFigures", "Figure2.png"), plot_age_exp, width = 17, height = 10, dpi = 400)
 
-#### Figure 3a (density conceptual map) ####
+#### Figure 4a (density conceptual map) ####
 
 # 1) Read beaches geopackage
 beaches <- st_read(here("IntermediateData", "beaches.gpkg"), quiet = TRUE)
@@ -807,7 +886,7 @@ seal_density_map <- ggplot() +
   scale_fill_viridis_c(option = "mako",
                        direction = -1,
                        limits = density_limits,
-                       name = "Conspecific density\n(seals in a 10m radius)") +
+                       name = "Seal density\n(seals in a 10m radius)") +
   annotation_scale(location = "bl", width_hint = 0.25, text_face = "bold", text_cex = 1.5, text_col = "white") +
   coord_sf(xlim = c(bbox_expanded["xmin"], bbox_expanded["xmax"]),
            ylim = c(bbox_expanded["ymin"], bbox_expanded["ymax"]),
@@ -820,11 +899,11 @@ seal_density_map <- ggplot() +
 
 ggsave(here("TablesFigures", "Figure3a.png"), plot = seal_density_map, width = 18, height = 14, dpi = 300, bg = "transparent")
 
-#### Figure 3b (conspecific density effect) ####
+#### Figure 4b (seal density effect) ####
 
 # 1) Define density bins used for observed points
-model_variables_2016_2023$density_bin <- cut_number(model_variables_2016_2023$avg_density,
-                                              n = 8, labels = FALSE)
+model_variables_2016_2023 <- model_variables_2016_2023 %>%
+  mutate(density_bin = ntile(avg_density, 8))
 
 # 2) Compute pooled observed MOA_proportion by density bin (black points + binomial CIs)
 observed_density_2016_2023 <- model_variables_2016_2023 %>%
@@ -838,17 +917,17 @@ observed_density_2016_2023 <- model_variables_2016_2023 %>%
             upr = binom.test(n_success, n_trials)$conf.int[2],
             .groups = "drop")
 
-# 1) Define x-axis density values across the observed range
+# 3) Define x-axis density values across the observed range
 density_vals <- seq(min(model_variables_2016_2023$avg_density, na.rm = TRUE), #minimum observed density
                     max(model_variables_2016_2023$avg_density, na.rm = TRUE), #maximum observed density
                     length.out = 100) #number of x-axis values for smooth curve
 
-# 2) Build standardized newdata for each density value D (for post-stratification)
+# 4) Build standardized newdata for each density value D (for post-stratification)
 # For each D, keep the full predictors of model_variables_2016_2023 but overwrite avg_density as if everyone had density D
 nd_by_density <- lapply(density_vals, \(D) transform(model_variables_2016_2023, #preserve covariate distribution and weights
                                                      avg_density = D)) #overwrite avg_density so every row is evaluated at density D
 
-# 3) Post-stratified curve: predict for each density, then compute weighted average using total_resights
+# 5) Post-stratified curve: predict for each density, then compute weighted average using total_resights
 post_curve_density <- function(fit) {
   vapply(seq_along(nd_by_density), function(d){ #loop over density values
     nd <- nd_by_density[[d]] #newdata for one density value
@@ -857,19 +936,19 @@ post_curve_density <- function(fit) {
   }, numeric(1)) #numeric vector of predictions across density values
 }
 
-# 4) Bootstrap CI for the overall density curve using parametric bootstrapping of the fitted GLMM
+# 6) Bootstrap CI for the overall density curve using parametric bootstrapping of the fitted GLMM
 overall_density_2016_2023 <- tibble(avg_density = density_vals, #continuous density values
-                                    pred = post_curve_density(mod_binom_2016_2023)) #overall post-stratified predictions
+                                    pred = post_curve_density(mod_age_2016_2023)) #overall post-stratified predictions
 
-boot_density_2016_2023 <- bootMer(mod_binom_2016_2023, FUN = post_curve_density, nsim = nsim, #bootstrap curves
+boot_density_2016_2023 <- bootMer(mod_age_2016_2023, FUN = post_curve_density, nsim = nsim, #bootstrap curves
                                   type = "parametric", use.u = FALSE) #parametric bootstrap = simulate ranef each time
 
-# 5) Turn bootstrap curves into 95% CI bands
+# 7) Turn bootstrap curves into 95% CI bands
 ci_density_2016_2023 <- overall_density_2016_2023 %>%
   mutate(lo = apply(boot_density_2016_2023$t, 2, quantile, 0.025, na.rm = TRUE), #2.5% quantile at each density value
          hi = apply(boot_density_2016_2023$t, 2, quantile, 0.975, na.rm = TRUE)) #97.5% quantile at each density value
 
-# 8) Make density plot: bootstrap ribbon + weighted mean line + binned observed data by season
+# 8) Make density plot: bootstrap ribbon + weighted mean line + binned observed data by cut_number
 plot_density <- ggplot() +
   geom_ribbon(data = ci_density_2016_2023, #bootstrap CI band for overall curve
               aes(avg_density, ymin = lo, ymax = hi),
@@ -891,18 +970,18 @@ plot_density <- ggplot() +
                         begin = 0.1,
                         end = 0.8,
                         direction = -1,
-                        limits = density_limits, #use same color scale as map
+                        limits = density_limits, #match color scale to map
                         name = "Density") +
   coord_cartesian(ylim = c(0.8, 1), clip = "off") + 
   scale_x_continuous(n.breaks = 6) +
   scale_y_continuous(n.breaks = 3) +
   theme_few(base_size = 28) +
-  labs(x = "Conspecific density (seals in a 10m radius)",
+  labs(x = "Seal density (seals in a 10m radius)",
        y = "Mother-offspring association"); plot_density
 
-ggsave(here("TablesFigures", "Figure3b.png"), plot_density, width = 11, height = 8, dpi = 800)
+ ggsave(here("TablesFigures", "Figure3b.png"), plot_density, width = 12, height = 8, dpi = 800)
 
-########### Figure 3c (extreme wave and tide effect) ############
+########### Figure 4c (extreme wave and tide effect) ############
 
 # Set plotting colors for seasons
 pal <- c("#E57373","#E6A64C","#E5C76B","#7FBF7B","#2E7D32","#5C7EE5","#6DAEDB","#D77CC8")
@@ -954,32 +1033,15 @@ ci_extreme_2016_2023 <- overall_extreme_2016_2023 %>%
 model_variables_2016_2023$season_fct <- factor(model_variables_2016_2023$season_fct,
                                          levels = c("2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023"))
 
-## stagger CIs so they don't overlap
-observed_extreme_2016_2023 <- observed_extreme_2016_2023 %>%
-  arrange(n_extreme_both) %>%
-  mutate(close_group = cumsum(c(TRUE, diff(n_extreme_both) > 1))) %>% #find nearby x values
-  group_by(n_extreme_both) %>% #dodge exact duplicates only for CIs and points
-  arrange(season_fct, .by_group = TRUE) %>%
-  mutate(lab_id = row_number(), 
-         x_plot = if (n() == 1) {
-           n_extreme_both
-           } else {
-             n_extreme_both + (lab_id - mean(lab_id)) * 0.9 
-             }) %>%
-  ungroup() %>%
-  group_by(close_group) %>% #labels: spread nearby values only
-  arrange(n_extreme_both, .by_group = TRUE) %>%
-  mutate(
-    lab_close_id = row_number(),
-    x_lab = if (n() == 1) {
-      x_plot
-    } else {
-      mean(n_extreme_both) + (lab_close_id - mean(lab_close_id)) * 2
-    },
-    y_lab = 1
-  ) %>%
-  ungroup()
+#make sample size labels next to each season
+legend_labs <- observed_extreme_2016_2023 %>%
+  distinct(season_fct, n_obs) %>%
+  arrange(season_fct)
 
+year_labs <- setNames(paste0(legend_labs$season_fct, " (n = ", legend_labs$n_obs, ")"),
+  legend_labs$season_fct)
+
+# 7) Extreme events figure: bootstrap ribbon + weighted mean line + binned observed data by season
 plot_n_extreme <- ggplot() +
   geom_ribbon(data = ci_extreme_2016_2023, 
               aes(n_extreme_both, ymin = lo, ymax = hi),
@@ -990,116 +1052,22 @@ plot_n_extreme <- ggplot() +
             color = "black",
             linewidth = 1.2) +
   geom_pointrange(data = observed_extreme_2016_2023,
-                  aes(x_plot, avg_prop,
+                  aes(n_extreme_both, avg_prop,
                       ymin = lwr, ymax = upr,
                       color = season_fct),
-                  size = 1.1,
-                  linewidth = 1.1) +
-  geom_text(data = observed_extreme_2016_2023,
-            aes(x_lab, y_lab, label = n_obs),
-            color = "black",
-            size = 5,
-            vjust = 0,
-            show.legend = FALSE) +
-  scale_color_manual(values = pal, name = "Year") +
+    position = position_dodge(width = 1),
+    size = 1.1,
+    linewidth = 1.1) +
+  scale_color_manual(values = pal,
+                     labels = year_labs,
+                     name = "Year") +
   coord_cartesian(ylim = c(0.8, 1), clip = "off") +
   scale_x_continuous(n.breaks = 6) +
   scale_y_continuous(n.breaks = 3) +
   theme_few(base_size = 28) +
   labs(x = "Number of per-year extreme wave and tide events", y = "Mother-offspring association"); plot_n_extreme
 
-ggsave(here("TablesFigures", "Figure3c.png"), plot_n_extreme, width = 11, height = 8, dpi = 800)
-
-#### Figure 3b (with raw data points) ####
-
-# Density plot: bootstrap ribbon + weighted mean line + raw points weighted by total resights
-plot_density_jitter <- ggplot() +
-  geom_jitter(data = model_variables_2016_2023,
-              aes(avg_density,
-                  MOA_proportion,
-                  size = total_resights,
-                  color = avg_density),
-              alpha = 0.3,
-              width = 0.15,
-              height = 0.02) +
-  geom_ribbon(data = ci_density_2016_2023,
-              aes(avg_density, ymin = lo, ymax = hi),
-              fill = "black",
-              alpha = 0.3) +
-  geom_line(data = ci_density_2016_2023,
-            aes(avg_density, pred),
-            color = "black",
-            linewidth = 1.3) +
-  scale_color_viridis_c(option = "mako",
-                        direction = -1,
-                        limits = density_limits,
-                        name = "Conspecific density") +
-  scale_size_continuous(name = "Observations") +
-  coord_cartesian(ylim = c(0, 1.01), clip = "off") +
-  theme_few(base_size = 18) +
-  labs(x = "Conspecific density (seals in a 10m radius)",
-       y = "Mother-offspring association"); plot_density_jitter
-
-ggsave(here("TablesFigures", "Figure3b_raw.png"), plot_density_jitter, width = 10, height = 8, dpi = 800)
-
-#### Figure 3c (with raw data points) ####
-
-# 9) Make extreme events plot with jittered raw points
-plot_n_extreme_jitter <- ggplot() +
-  geom_jitter(data = model_variables_2016_2023, #raw observations weighted by resights
-              aes(n_extreme_both, MOA_proportion, size = total_resights, color = season_fct),
-              alpha = 0.35,
-              width = 0.15,
-              height = 0.02) +
-  geom_ribbon(data = ci_extreme_2016_2023, #bootstrap CI band for overall curve
-              aes(n_extreme_both, ymin = lo, ymax = hi),
-              fill = "black",
-              alpha = 0.3) +
-  geom_line(data = ci_extreme_2016_2023, #overall post-stratified prediction line
-            aes(n_extreme_both, pred),
-            color = "black",
-            linewidth = 1.3) +
-  scale_color_manual(values = pal, name = "Year") +
-  scale_size_continuous(name = "Observations") +
-  guides(color = guide_legend(override.aes = list(size = 5))) +
-  scale_x_continuous(n.breaks = 10) +
-  scale_y_continuous(n.breaks = 5) +
-  coord_cartesian(ylim = c(0, 1), clip = "off") +
-  theme_few(base_size = 18) +
-  labs(x = "Number of per-year extreme wave and tide events",
-       y = "Mother-offspring association"); plot_n_extreme_jitter
-
-ggsave(here("TablesFigures", "Figure3c_raw.png"), plot_n_extreme_jitter, width = 6, height = 8, dpi = 800)
-
-#### Figure 4 (offspring weaning mass vs. MOA) ####
-
-# 1) Predicted effect of mother-offspring association on wean mass
-pred_wean_mass <- ggpredict(mod_wean_mass,
-                            terms = "MOA_proportion")
-
-# 2) Plot model predictions
-plot_wean <- ggplot() +
-  geom_jitter(data = model_variables,
-              aes(x = (MOA_proportion), y = Wt_wean_corrected),
-              size = 1.5,
-              color = "#664388",
-              alpha = 0.45,
-              width = 0.003,
-              height = 0) +
-  geom_ribbon(data = pred_wean_mass,
-              aes(x = x, ymin = conf.low, ymax = conf.high),
-              fill = "black",
-              alpha = 0.18) +
-  geom_line(data = pred_wean_mass,
-            aes(x = x, y = predicted),
-            color = "black",
-            linewidth = 1.3) +
-  coord_cartesian(xlim = range(model_variables_wean$MOA_proportion, na.rm = TRUE)) +
-  labs(x = "Mother-offspring association",
-       y = "Offspring weaning mass (kg)") +
-  theme_classic(base_size = 20); plot_wean
-
-ggsave(here("TablesFigures", "Figure4.png"), plot_wean, width = 10, height = 8, dpi = 800)
+ggsave(here("TablesFigures", "Figure3c.png"), plot_n_extreme, width = 12, height = 8, dpi = 800)
 
 # SUPPLEMENTARY TABLES AND FIGURES -----------------------------------
 
@@ -1121,11 +1089,12 @@ make_mod_flextable <- function(model, #extract fixed effects from model
       Estimate = as.character(round(estimate, digits)), #round estimates
       SE = as.character(round(std.error, se_digits)), #round SEs
       Z = as.character(round(statistic, digits)), #round Z value
-      "P-value" = case_when(p.value < 0.001 ~ paste0(formatC(p.value, format = "e", digits = 1), " ***"), #format p-values and significance labels
-                            p.value < 0.01 ~ paste0(round(p.value, 4), " **"),
-                            p.value < 0.05 ~ paste0(round(p.value, 4), " *"),
-                            TRUE ~ as.character(round(p.value, 4)))) %>%
-    select(Predictor, Estimate, SE, Z, "P-value")
+      p_sci = p.value < 0.001,
+      p_mant = signif(p.value / 10^floor(log10(p.value)), 1),
+      p_exp = floor(log10(p.value)),
+      "P-value" = case_when(p_sci ~ paste0(p_mant, " x 10^", p_exp), #format p-vals
+                            TRUE ~ sprintf("%.4f", p.value))) %>%
+    select(Predictor, Estimate, SE, Z, "P-value", p_sci, p_mant, p_exp)
   
   random_tbl <- tidy(model, effects = "ran_pars") %>% #random effects
     transmute(Predictor = paste0("Random effect: ", 
@@ -1134,18 +1103,31 @@ make_mod_flextable <- function(model, #extract fixed effects from model
                                         season_fct = "Year",
                                         Residual = "Residual")),
               Estimate = as.character(round(estimate^2, digits)), #rounded ranef estimate
-              SE = as.character(round(estimate, digits)), #rounded ranef SE
+              SE = "",
               Z = "",
-              "P-value" = "")
+              "P-value" = "",
+              p_sci = FALSE,
+              p_mant = NA_real_,
+              p_exp = NA_real_)
   
-  out_tbl <- bind_rows(fixed_tbl, random_tbl) #keep both fixed and ranef
-
-  #save format as flextable
+  out_tbl <- bind_rows(fixed_tbl, random_tbl)
   
   ft <- out_tbl %>%
+    select(Predictor, Estimate, SE, Z, "P-value") %>%
     flextable() %>%
     align(align = "center", part = "all") %>%
     autofit()
+  
+  sci_rows <- which(out_tbl$p_sci %in% TRUE)
+  
+  if (length(sci_rows) > 0) {
+    ft <- flextable::compose(ft,
+                             i = sci_rows,
+                             j = "P-value",
+                             value = as_paragraph(as_chunk(out_tbl$p_mant[sci_rows]),
+                                                  " × 10",
+                                                  as_sup(as_chunk(sprintf("%.0f", out_tbl$p_exp[sci_rows])))))
+  }
   
   if (!is.null(save_path)) {
     save_as_docx(ft, path = save_path)
@@ -1159,7 +1141,7 @@ make_mod_flextable(mod_age_2016_2023,
                    predictor_labels = c("(Intercept)" = "Intercept",
                                         "age" = "Maternal age",
                                         "n_extreme_both" = "Number of extreme wave and tide events",
-                                        "avg_density" = "Conspecific density"),
+                                        "avg_density" = "Seal density"),
                    save_path = here("TablesFigures", "mod_age_2016_2023_output.docx"))
 
 ### Table S2. Model output from the 2016-2023 model with previous pupping experience ###
@@ -1167,7 +1149,7 @@ make_mod_flextable(mod_exp_2016_2023,
                    predictor_labels = c("(Intercept)" = "Intercept",
                                         "pupping_exp" = "Previous pupping experience",
                                         "n_extreme_both" = "Number of extreme wave and tide events",
-                                        "avg_density" = "Conspecific density"),
+                                        "avg_density" = "Seal density"),
                    save_path = here("TablesFigures", "mod_exp_2016_2023_output.docx"))
 
 ### Table S3. Model output from the 1996-2025 piecewise segmented regression for maternal age. ###
@@ -1191,237 +1173,7 @@ make_mod_flextable(mod_wean_mass,
                                         "age" = "Maternal age"),
                    save_path = here("TablesFigures", "mod_wean_mass_output.docx"))
 
-#### Table S6 (age linear vs. quadratic vs. breakpoint, 1996-2025) ####
-
-### threshold ###
-
-mod_age_thresh_1996_2025 <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link= "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_age_thresh_1996_2025) #model summary
-
-### linear ###
-
-mod_age_linear_1996_2025 <- glmer(MOA_proportion ~ age + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link= "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_age_linear_1996_2025) #model summary
-
-### quadratic ###
-
-mod_age_quad_1996_2025 <- glmer(MOA_proportion ~ age + I(age^2) + (1 | animalID_fct) + (1 | season_fct),
-                                weights = total_resights,
-                                family = binomial(link= "logit"),
-                                control = glmerControl(optimizer = "bobyqa"),
-                                data = model_variables); summary(mod_age_quad_1996_2025) #model summary
-
-## name models to compare
-mod_age_comparisons_1996_2025 <- list(Linear = mod_age_linear_1996_2025,
-                                      Quadratic = mod_age_quad_1996_2025,
-                                      Threshold = mod_age_thresh_1996_2025)
-
-# 2) make table with AIC comparisons
-aic_table_age_1996_2025 <- tibble(Model = names(mod_age_comparisons_1996_2025),
-                                  AIC = sapply(mod_age_comparisons_1996_2025, AIC)) %>%
-  mutate(delta_AIC = AIC - min(AIC),
-         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
-  arrange(delta_AIC)
-
-# 3) relabel table for formatting
-aic_table_age_1996_2025 <- aic_table_age_1996_2025 %>%
-  transmute(Model = Model,
-            AIC = round(AIC, 1),
-            "ΔAIC" = round(delta_AIC, 2),
-            "AIC weight" = round(aic_weights, 3)) %>%
-  arrange("ΔAIC")
-
-best_model <- aic_table_age_1996_2025$Model[1] #best model is the one with lowest AIC difference
-
-# 4) make flextable
-aic_table_age_1996_2025 <- flextable(aic_table_age_1996_2025) %>%
-  align(align = "center", part = "all") %>%
-  bold(i = which(aic_table_age_1996_2025$Model == best_model), #bold best model
-       part = "body"); aic_table_age_1996_2025
-
-#save final table
-save_as_docx(aic_table_age_1996_2025, path = here("TablesFigures", "2016_2023_Age_Predictor_Comparison.docx"))
-
-#### Table S7 (age linear vs. quadratic vs. breakpoint, 2016-2023) ####
-
-### threshold ###
-
-mod_age_thresh_2016_2023 <- glmer(MOA_proportion ~ age_cat : age10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link= "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_age_thresh_2016_2023) #model summary
-
-### linear ###
-
-mod_age_linear_2016_2023 <- glmer(MOA_proportion ~ age + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link= "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_age_linear_2016_2023) #model summary
-
-### quadratic ###
-
-mod_age_quad_2016_2023 <- glmer(MOA_proportion ~ age + I(age^2) + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                weights = total_resights,
-                                family = binomial(link= "logit"),
-                                control = glmerControl(optimizer = "bobyqa"),
-                                data = model_variables); summary(mod_age_quad_2016_2023) #model summary
-
-# 1) name models to compare
-mod_age_comparisons_2016_2023 <- list(Linear = mod_age_linear_2016_2023,
-                                      Quadratic = mod_age_quad_2016_2023,
-                                      Threshold = mod_age_thresh_2016_2023)
-
-# 2) make table with AIC comparisons
-aic_table_age_2016_2023 <- tibble(Model = names(mod_age_comparisons_2016_2023),
-                                  AIC = sapply(mod_age_comparisons_2016_2023, AIC)) %>%
-  mutate(delta_AIC = AIC - min(AIC),
-         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
-  arrange(delta_AIC)
-
-# 3) relabel table for formatting
-aic_table_age_2016_2023 <- aic_table_age_2016_2023 %>%
-  transmute(Model = Model,
-            AIC = round(AIC, 1),
-            "ΔAIC" = round(delta_AIC, 2),
-            "AIC weight" = round(aic_weights, 3)) %>%
-  arrange("ΔAIC")
-
-best_model <- aic_table_age_2016_2023$Model[1] #best model is the one with lowest AIC difference
-
-# 4) make flextable
-aic_table_age_2016_2023 <- flextable(aic_table_age_2016_2023) %>%
-  align(align = "center", part = "all") %>%
-  bold(i = which(aic_table_age_2016_2023$Model == best_model), #bold lowest AIC model
-       part = "body"); aic_table_age_2016_2023
-
-#save final table
-save_as_docx(aic_table_age_2016_2023, path = here("TablesFigures", "2016_2023_Age_Predictor_Comparison.docx"))
-
-#### Table S8 (experience linear vs. quadratic vs. breakpoint, 1996-2025) ####
-
-### threshold ###
-
-mod_exp_thresh_1996_2025 <- glmer(MOA_proportion ~ experience_cat : exp10 + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link = "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_exp_thresh_1996_2025)
-
-
-### linear ###
-
-mod_exp_linear_1996_2025 <- glmer(MOA_proportion ~ pupping_exp + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link = "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_exp_linear_1996_2025)
-
-### quadratic ###
-
-mod_exp_quad_1996_2025 <- glmer(MOA_proportion ~ exp10 + I(exp10^2) + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link = "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_exp_quad_1996_2025)
-
-# 1) name models to compare
-mod_exp_comparisons_1996_2025 <- list(Linear = mod_exp_linear_1996_2025,
-                                      Quadratic = mod_exp_quad_1996_2025,
-                                      Threshold = mod_exp_thresh_1996_2025)
-
-# 2) make table with AIC comparisons
-aic_table_exp_1996_2025 <- tibble(Model = names(mod_exp_comparisons_1996_2025),
-                                  AIC = sapply(mod_exp_comparisons_1996_2025, AIC),
-                                  K = sapply(mod_exp_comparisons_1996_2025, function(m) attr(logLik(m), "df"))) %>%
-  mutate(delta_AIC = AIC - min(AIC),
-         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
-  arrange(delta_AIC)
-
-# 3) relabel table for formatting
-aic_table_exp_1996_2025 <- aic_table_exp_1996_2025 %>%
-  transmute(Model = Model, 
-            AIC = round(AIC, 1),
-            "ΔAIC" = round(delta_AIC, 2),
-            "AIC weight" = round(aic_weights, 3)) %>%
-  arrange("ΔAIC")
-
-best_model <- aic_table_exp_1996_2025$Model[1] #best model is the one with lowest AIC difference
-
-# 4) make flextable
-aic_table_exp_1996_2025 <- flextable(aic_table_exp_1996_2025) %>%
-  align(align = "center", part = "all") %>%
-  bold(i = which(aic_table_exp_1996_2025$Model == best_model), #bold lowest AIC model
-       part = "body"); aic_table_exp_1996_2025
-
-#save final table
-save_as_docx(aic_table_exp_1996_2025, path = here("TablesFigures", "1996_2025_Experience_Predictor_Comparison.docx"))
-
-############ Table S9 (experience linear vs. quadratic vs. breakpoint, 2016-2023) ##################
-
-### threshold ###
-
-mod_exp_thresh_2016_2023 <- glmer(MOA_proportion ~ experience_cat : exp10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link= "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_exp_thresh_2016_2023) #model summary
-
-### linear ###
-
-mod_exp_linear_2016_2023 <- glmer(MOA_proportion ~ pupping_exp + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link = "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_exp_linear_2016_2023)
-
-### quadratic ###
-
-mod_exp_quad_2016_2023 <- glmer(MOA_proportion ~ exp10 + I(exp10^2) + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                weights = total_resights,
-                                family = binomial(link = "logit"),
-                                control = glmerControl(optimizer = "bobyqa"),
-                                data = model_variables); summary(mod_exp_quad_2016_2023)
-
-# 1) name models to compare
-mod_exp_comparisons_2016_2023 <- list(Linear = mod_exp_linear_2016_2023,
-                                      Quadratic = mod_exp_quad_2016_2023,
-                                      Threshold = mod_exp_thresh_2016_2023)
-
-# 2) make table with AIC comparisons
-aic_table_exp_2016_2023 <- tibble(Model = names(mod_exp_comparisons_2016_2023),
-                                  AIC = sapply(mod_exp_comparisons_2016_2023, AIC)) %>%
-  mutate(delta_AIC = AIC - min(AIC),
-         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
-  arrange(delta_AIC)
-
-# 3) relabel table for formatting
-aic_table_exp_2016_2023 <- aic_table_exp_2016_2023 %>%
-  transmute(Model = Model,
-            AIC = round(AIC, 1),
-            "ΔAIC" = round(delta_AIC, 2),
-            "AIC weight" = round(aic_weights, 3)) %>%
-  arrange("ΔAIC")
-
-best_model <- aic_table_exp_2016_2023$Model[1] #best model is the one with lowest AIC difference
-
-# 4) make flextable
-aic_table_exp_2016_2023 <- flextable(aic_table_exp_2016_2023) %>%
-  align(align = "center", part = "all") %>%
-  bold(i = which(aic_table_exp_2016_2023$Model == best_model), #bold lowest AIC model
-       part = "body"); aic_table_exp_2016_2023
-
-#save final table
-save_as_docx(aic_table_exp_2016_2023, path = here("TablesFigures", "2016_2023_Experience_Predictor_Comparison.docx"))
-
-#### Table S10 (age threshold comparison) ####
+#### Table S6 (age threshold comparison) ####
 
 # 1) test all possible thresholds
 age_cutoff <- 5:14
@@ -1474,7 +1226,7 @@ age_threshold_comparison_ft <- flextable(age_threshold_comparison_tbl) %>%
 
 save_as_docx(age_threshold_comparison_ft, path = here("TablesFigures", "AIC_Age_Threshold_Comparison.docx"))
 
-#### Table S11 (experience threshold comparison) ####
+#### Table S7 (experience threshold comparison) ####
 
 # 1) test all possible experience thresholds
 exp_cutoff <- 1:11
@@ -1526,11 +1278,243 @@ exp_threshold_comparison_ft <- flextable(exp_threshold_comparison_tbl) %>%
 
 save_as_docx(exp_threshold_comparison_ft, path = here("TablesFigures", "AIC_Experience_Threshold_Comparison.docx"))
 
-#### Figure S2 (variation in pupping experience within ages) ####
+#### Table S8 (age linear vs. quadratic vs. breakpoint, 1996-2025) ####
+
+#all use age10 for consistency and to improve convergence
+
+### threshold ###
+
+mod_age_thresh_1996_2025 <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link= "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_age_thresh_1996_2025) #model summary
+
+### linear ###
+
+mod_age_linear_1996_2025 <- glmer(MOA_proportion ~ age10 + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link= "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_age_linear_1996_2025) #model summary
+
+### quadratic ###
+
+mod_age_quad_1996_2025 <- glmer(MOA_proportion ~ age10 + I(age10^2) + (1 | animalID_fct) + (1 | season_fct),
+                                weights = total_resights,
+                                family = binomial(link= "logit"),
+                                control = glmerControl(optimizer = "bobyqa"),
+                                data = model_variables); summary(mod_age_quad_1996_2025) #model summary
+
+## name models to compare
+mod_age_comparisons_1996_2025 <- list(Linear = mod_age_linear_1996_2025,
+                                      Quadratic = mod_age_quad_1996_2025,
+                                      Threshold = mod_age_thresh_1996_2025)
+
+# 2) make table with AIC comparisons
+aic_table_age_1996_2025 <- tibble(Model = names(mod_age_comparisons_1996_2025),
+                                  AIC = sapply(mod_age_comparisons_1996_2025, AIC)) %>%
+  mutate(delta_AIC = AIC - min(AIC),
+         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
+  arrange(delta_AIC)
+
+# 3) relabel table for formatting
+aic_table_age_1996_2025 <- aic_table_age_1996_2025 %>%
+  transmute(Model = Model,
+            AIC = round(AIC, 1),
+            "ΔAIC" = round(delta_AIC, 2),
+            "AIC weight" = round(aic_weights, 3)) %>%
+  arrange("ΔAIC")
+
+best_model <- aic_table_age_1996_2025$Model[1] #best model is the one with lowest AIC difference
+
+# 4) make flextable
+aic_table_age_1996_2025 <- flextable(aic_table_age_1996_2025) %>%
+  align(align = "center", part = "all") %>%
+  bold(i = which(aic_table_age_1996_2025$Model == best_model), #bold best model
+       part = "body"); aic_table_age_1996_2025
+
+#save final table
+save_as_docx(aic_table_age_1996_2025, path = here("TablesFigures", "2016_2023_Age_Predictor_Comparison.docx"))
+
+#### Table S9 (age linear vs. quadratic vs. breakpoint, 2016-2023) ####
+
+### threshold ###
+
+mod_age_thresh_2016_2023 <- glmer(MOA_proportion ~ age_cat : age10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link= "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_age_thresh_2016_2023) #model summary
+
+### linear ###
+
+mod_age_linear_2016_2023 <- glmer(MOA_proportion ~ age10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link= "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_age_linear_2016_2023) #model summary
+
+### quadratic ###
+
+mod_age_quad_2016_2023 <- glmer(MOA_proportion ~ age10 + I(age10^2) + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                weights = total_resights,
+                                family = binomial(link= "logit"),
+                                control = glmerControl(optimizer = "bobyqa"),
+                                data = model_variables); summary(mod_age_quad_2016_2023) #model summary
+
+# 1) name models to compare
+mod_age_comparisons_2016_2023 <- list(Linear = mod_age_linear_2016_2023,
+                                      Quadratic = mod_age_quad_2016_2023,
+                                      Threshold = mod_age_thresh_2016_2023)
+
+# 2) make table with AIC comparisons
+aic_table_age_2016_2023 <- tibble(Model = names(mod_age_comparisons_2016_2023),
+                                  AIC = sapply(mod_age_comparisons_2016_2023, AIC)) %>%
+  mutate(delta_AIC = AIC - min(AIC),
+         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
+  arrange(delta_AIC)
+
+# 3) relabel table for formatting
+aic_table_age_2016_2023 <- aic_table_age_2016_2023 %>%
+  transmute(Model = Model,
+            AIC = round(AIC, 1),
+            "ΔAIC" = round(delta_AIC, 2),
+            "AIC weight" = round(aic_weights, 3)) %>%
+  arrange("ΔAIC")
+
+best_model <- aic_table_age_2016_2023$Model[1] #best model is the one with lowest AIC difference
+
+# 4) make flextable
+aic_table_age_2016_2023 <- flextable(aic_table_age_2016_2023) %>%
+  align(align = "center", part = "all") %>%
+  bold(i = which(aic_table_age_2016_2023$Model == best_model), #bold lowest AIC model
+       part = "body"); aic_table_age_2016_2023
+
+#save final table
+save_as_docx(aic_table_age_2016_2023, path = here("TablesFigures", "2016_2023_Age_Predictor_Comparison.docx"))
+
+#### Table S10 (experience linear vs. quadratic vs. breakpoint, 1996-2025) ####
+
+### threshold ###
+
+mod_exp_thresh_1996_2025 <- glmer(MOA_proportion ~ experience_cat : exp10 + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link = "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_exp_thresh_1996_2025)
+
+
+### linear ###
+
+mod_exp_linear_1996_2025 <- glmer(MOA_proportion ~ exp10 + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link = "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_exp_linear_1996_2025)
+
+### quadratic ###
+
+mod_exp_quad_1996_2025 <- glmer(MOA_proportion ~ exp10 + I(exp10^2) + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link = "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_exp_quad_1996_2025)
+
+# 1) name models to compare
+mod_exp_comparisons_1996_2025 <- list(Linear = mod_exp_linear_1996_2025,
+                                      Quadratic = mod_exp_quad_1996_2025,
+                                      Threshold = mod_exp_thresh_1996_2025)
+
+# 2) make table with AIC comparisons
+aic_table_exp_1996_2025 <- tibble(Model = names(mod_exp_comparisons_1996_2025),
+                                  AIC = sapply(mod_exp_comparisons_1996_2025, AIC),
+                                  K = sapply(mod_exp_comparisons_1996_2025, function(m) attr(logLik(m), "df"))) %>%
+  mutate(delta_AIC = AIC - min(AIC),
+         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
+  arrange(delta_AIC)
+
+# 3) relabel table for formatting
+aic_table_exp_1996_2025 <- aic_table_exp_1996_2025 %>%
+  transmute(Model = Model, 
+            AIC = round(AIC, 1),
+            "ΔAIC" = round(delta_AIC, 2),
+            "AIC weight" = round(aic_weights, 3)) %>%
+  arrange("ΔAIC")
+
+best_model <- aic_table_exp_1996_2025$Model[1] #best model is the one with lowest AIC difference
+
+# 4) make flextable
+aic_table_exp_1996_2025 <- flextable(aic_table_exp_1996_2025) %>%
+  align(align = "center", part = "all") %>%
+  bold(i = which(aic_table_exp_1996_2025$Model == best_model), #bold lowest AIC model
+       part = "body"); aic_table_exp_1996_2025
+
+#save final table
+save_as_docx(aic_table_exp_1996_2025, path = here("TablesFigures", "1996_2025_Experience_Predictor_Comparison.docx"))
+
+############ Table S11 (experience linear vs. quadratic vs. breakpoint, 2016-2023) ##################
+
+### threshold ###
+
+mod_exp_thresh_2016_2023 <- glmer(MOA_proportion ~ experience_cat : exp10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link= "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_exp_thresh_2016_2023) #model summary
+
+### linear ###
+
+mod_exp_linear_2016_2023 <- glmer(MOA_proportion ~ exp10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link = "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_exp_linear_2016_2023)
+
+### quadratic ###
+
+mod_exp_quad_2016_2023 <- glmer(MOA_proportion ~ exp10 + I(exp10^2) + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                weights = total_resights,
+                                family = binomial(link = "logit"),
+                                control = glmerControl(optimizer = "bobyqa"),
+                                data = model_variables); summary(mod_exp_quad_2016_2023)
+
+# 1) name models to compare
+mod_exp_comparisons_2016_2023 <- list(Linear = mod_exp_linear_2016_2023,
+                                      Quadratic = mod_exp_quad_2016_2023,
+                                      Threshold = mod_exp_thresh_2016_2023)
+
+# 2) make table with AIC comparisons
+aic_table_exp_2016_2023 <- tibble(Model = names(mod_exp_comparisons_2016_2023),
+                                  AIC = sapply(mod_exp_comparisons_2016_2023, AIC)) %>%
+  mutate(delta_AIC = AIC - min(AIC),
+         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
+  arrange(delta_AIC)
+
+# 3) relabel table for formatting
+aic_table_exp_2016_2023 <- aic_table_exp_2016_2023 %>%
+  transmute(Model = Model,
+            AIC = round(AIC, 1),
+            "ΔAIC" = round(delta_AIC, 2),
+            "AIC weight" = round(aic_weights, 3)) %>%
+  arrange("ΔAIC")
+
+best_model <- aic_table_exp_2016_2023$Model[1] #best model is the one with lowest AIC difference
+
+# 4) make flextable
+aic_table_exp_2016_2023 <- flextable(aic_table_exp_2016_2023) %>%
+  align(align = "center", part = "all") %>%
+  bold(i = which(aic_table_exp_2016_2023$Model == best_model), #bold lowest AIC model
+       part = "body"); aic_table_exp_2016_2023
+
+#save final table
+save_as_docx(aic_table_exp_2016_2023, path = here("TablesFigures", "2016_2023_Experience_Predictor_Comparison.docx"))
+
+#### Figure S1 (variation in pupping experience within ages) ####
 
 # reproductive experience vs age figure
 
-# most typical recruitment age
+# 1) Most typical recruitment age
 recruitment_age <- model_variables %>%
   filter(pupping_exp == 0) %>% #first observed reproductive event
   count(age, sort = TRUE) %>%
@@ -1542,26 +1526,27 @@ recruitment_age
 #Most common recruitment age is 4
 typical_recruitment_age <- 4
 
+# 2) Plot variation in experience within each age
 plot_variation_exp <- ggplot(model_variables, 
                              aes(x = age,
                                  y = pupping_exp)) +
-  geom_jitter(width = 0.3,
+  geom_jitter(width = 0.2,
               height = 0.2,
               alpha = 0.4,
               size = 2.2,
               color = "#C8548C") +
-  geom_segment(aes(x = 4,
-                   y = 0,
-                   xend = 21,
-                   yend = 17),
-               color = "#80113C",
-               linewidth = 1) +
+  #create a solid line segment for expected trajectory of a mom that recruits at 4 and reproduces every year after
+  annotate("segment",
+           x = 4, y = 0,
+           xend = 21, #set limits based on values present in data
+           yend = 15, 
+           color = "#80113C",
+           linewidth = 1) +
   geom_vline(xintercept = typical_recruitment_age,
              linetype = "dashed",
              linewidth = 1) +
   annotate("text",
-           x = typical_recruitment_age,
-           y = 8,
+           x = typical_recruitment_age, y = 8,
            label = "Typical recruitment age (4 years old)",
            angle = 90,
            vjust = -0.6,
@@ -1574,9 +1559,70 @@ plot_variation_exp <- ggplot(model_variables,
   labs(x = "Maternal age (years)",
        y = "Previous pupping experience (number of pups)"); plot_variation_exp
 
-ggsave(here("TablesFigures", "FigureS2.png"), plot_variation_exp, width = 8, height = 6, dpi = 600)
+ggsave(here("TablesFigures", "FigureS1.png"), plot_variation_exp, width = 8, height = 6, dpi = 600)
 
-#### Figure S3 (age threshold significance comparison) ####
+#### Figure S2 (density with raw data points) ####
+
+# Density plot: bootstrap ribbon + weighted mean line + raw points weighted by total resights
+plot_density_jitter <- ggplot() +
+  geom_jitter(data = model_variables_2016_2023,
+              aes(avg_density,
+                  MOA_proportion,
+                  size = total_resights,
+                  color = avg_density),
+              alpha = 0.3,
+              width = 0.15,
+              height = 0.02) +
+  geom_ribbon(data = ci_density_2016_2023,
+              aes(avg_density, ymin = lo, ymax = hi),
+              fill = "black",
+              alpha = 0.3) +
+  geom_line(data = ci_density_2016_2023,
+            aes(avg_density, pred),
+            color = "black",
+            linewidth = 1.3) +
+  scale_color_viridis_c(option = "mako",
+                        direction = -1,
+                        limits = density_limits,
+                        name = "Conspecific density") +
+  scale_size_continuous(name = "Observations") +
+  coord_cartesian(ylim = c(0, 1.01), clip = "off") +
+  theme_few(base_size = 18) +
+  labs(x = "Conspecific density (seals in a 10m radius)",
+       y = "Mother-offspring association"); plot_density_jitter
+
+ggsave(here("TablesFigures", "FigureS2.png"), plot_density_jitter, width = 12, height = 8, dpi = 800)
+
+#### Figure S3 (extreme events with raw data points) ####
+
+# 9) Make extreme events plot with jittered raw points
+plot_n_extreme_jitter <- ggplot() +
+  geom_jitter(data = model_variables_2016_2023, #raw observations weighted by resights
+              aes(n_extreme_both, MOA_proportion, size = total_resights, color = season_fct),
+              alpha = 0.35,
+              width = 0.15,
+              height = 0.02) +
+  geom_ribbon(data = ci_extreme_2016_2023, #bootstrap CI band for overall curve
+              aes(n_extreme_both, ymin = lo, ymax = hi),
+              fill = "black",
+              alpha = 0.3) +
+  geom_line(data = ci_extreme_2016_2023, #overall post-stratified prediction line
+            aes(n_extreme_both, pred),
+            color = "black",
+            linewidth = 1.3) +
+  scale_color_manual(values = pal, name = "Year") +
+  scale_size_continuous(name = "Observations") +
+  guides(color = guide_legend(override.aes = list(size = 5))) +
+  scale_x_continuous(n.breaks = 10) +
+  scale_y_continuous(n.breaks = 5) +
+  coord_cartesian(ylim = c(0, 1), clip = "off") +
+  theme_few(base_size = 18) +
+  labs(x = "Number of per-year extreme wave and tide events",
+       y = "Mother-offspring association"); plot_n_extreme_jitter
+
+ggsave(here("TablesFigures", "FigureS3.png"), plot_n_extreme_jitter, width = 12, height = 8, dpi = 800)
+
+#### Figure S4 (age threshold significance comparison) ####
 
 #test all possible thresholds
 age_cutoff <- 5:14
@@ -1625,14 +1671,14 @@ age_threshold_comparison_figure <- ggplot(thr_res_age, aes(age_cutoff, coef)) +
                      labels = c(`TRUE` = "p < 0.05", `FALSE` = "p > 0.05"),
                      name = "Significance") +
   scale_size_continuous(range = c(0.5, 2.2), guide = "none") +
-  scale_x_continuous(breaks = cutoff) +
+  scale_x_continuous(breaks = age_cutoff) +
   labs(x = "Age senescence threshold",
        y = "Estimated old slope (log-odds)") +
   theme_classic(); age_threshold_comparison_figure
 
-ggsave(here("TablesFigures","FigureS3.png"), age_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
+ggsave(here("TablesFigures","FigureS4.png"), age_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
 
-###################### Figure S4 (experience threshold significance comparison) ############################
+###################### Figure S5 (experience threshold significance comparison) ############################
 
 #test all possible thresholds
 exp_cutoff <- 1:11
@@ -1686,5 +1732,5 @@ experience_threshold_comparison_figure <- ggplot(thr_res_exp, aes(exp_cutoff, co
        y = "Estimated experienced slope (log-odds)") +
   theme_classic(); experience_threshold_comparison_figure
 
-ggsave(here("TablesFigures", "FigureS4.png"), experience_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
+ggsave(here("TablesFigures", "FigureS5.png"), experience_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
 
