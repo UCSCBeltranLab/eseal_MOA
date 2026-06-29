@@ -386,7 +386,7 @@ plot_wean <- ggplot() +
        y = "Offspring weaning mass (kg)") +
   theme_classic(base_size = 20); plot_wean
 
-ggsave(here("TablesFigures", "Figure4.png"), plot_wean, width = 10, height = 8, dpi = 800)
+ggsave(here("TablesFigures", "Figure2.png"), plot_wean, width = 10, height = 8, dpi = 800)
 
 #### Figure 3a (breakpoint age, 1996-2025) ####
 
@@ -824,34 +824,50 @@ plot_age_exp <- plot_grid(age_plots, NULL, exp_plots,
 plot_age_exp
 
 # 4) Save figure
-ggsave(here("TablesFigures", "Figure2.png"), plot_age_exp, width = 17, height = 10, dpi = 400)
+ggsave(here("TablesFigures", "Figure3.png"), plot_age_exp, width = 17, height = 10, dpi = 400)
 
 #### Figure 4a (density conceptual map) ####
 
-# 1) Read beaches geopackage
+# 1) Define density bins used for observed points
+model_variables_2016_2023 <- model_variables_2016_2023 %>%
+  mutate(density_bin = ntile(avg_density, 8))
+
+# 2) For ranges, and Fig 4b compute pooled observed MOA_proportion by density bin (black points + binomial CIs)
+observed_density_2016_2023 <- model_variables_2016_2023 %>%
+  group_by(density_bin) %>%
+  summarise(avg_density = mean(avg_density, na.rm = TRUE),
+            n_bin = n(),
+            n_success = sum(count_1_pup, na.rm = TRUE),
+            n_trials = sum(total_resights, na.rm = TRUE),
+            avg_prop = n_success / n_trials,
+            lwr = binom.test(n_success, n_trials)$conf.int[1],
+            upr = binom.test(n_success, n_trials)$conf.int[2],
+            .groups = "drop")
+
+# 3) Read beaches geopackage
 beaches <- st_read(here("IntermediateData", "beaches.gpkg"), quiet = TRUE)
 
-# 2) Read density data
+# 4) Read density data
 seal_density <- read_csv(here("IntermediateData", "seal_density.csv"), show_col_types = FALSE)
 
-# 3) Mean density per beach across years
+# 5) Mean density per beach across years
 area_density_mean <- seal_density %>%
   rename(dominant_area = Beach) %>%
   group_by(dominant_area) %>%
   summarize(mean_density = mean(density, na.rm = TRUE), .groups = "drop")
 
-# 1) Replace "Beach" with dominant_area
+# 6) Replace "Beach" with dominant_area
 beaches_density <- beaches %>%
   left_join(area_density_mean, by = c("Beach" = "dominant_area"))
 
-# 2) Get extent for zooming and tile download
+# 7) Get extent for zooming and tile download
 bbox <- st_bbox(beaches_density)
 
-# 3) Convert bbox to sf object for maptiles
+# 8) Convert bbox to sf object for maptiles
 bbox_sf <- st_as_sfc(bbox) %>%
   st_as_sf()
 
-# 4) expand bbox slightly before downloading tiles (helps with map fit)
+# 9) expand bbox slightly before downloading tiles (helps with map fit)
 buffer_x <- 0.01
 buffer_y <- 0.0005
 
@@ -864,7 +880,7 @@ bbox_expanded["ymax"] <- bbox["ymax"] + buffer_y
 bbox_sf_expanded <- st_as_sfc(bbox_expanded) %>%
   st_as_sf()
 
-# 5) download tiles using expanded bbox
+# 10) download tiles using expanded bbox
 sat_map <- get_tiles(x = bbox_sf_expanded,
                      provider = "Esri.WorldImagery",
                      crop = TRUE,
@@ -875,7 +891,7 @@ density_limits <- range(c(beaches_density$mean_density,
                           observed_density_2016_2023$avg_density),
                         na.rm = TRUE) 
 
-# 6) make seal density heatmap
+# 11) make seal density heatmap
 seal_density_map <- ggplot() +
   geom_spatraster_rgb(data = sat_map) +
   geom_sf(data = beaches_density,
@@ -897,37 +913,21 @@ seal_density_map <- ggplot() +
         axis.title = element_blank(),
         panel.grid = element_blank()); seal_density_map
 
-ggsave(here("TablesFigures", "Figure3a.png"), plot = seal_density_map, width = 18, height = 14, dpi = 300, bg = "transparent")
+ggsave(here("TablesFigures", "Figure4a.png"), plot = seal_density_map, width = 18, height = 14, dpi = 300, bg = "transparent")
 
 #### Figure 4b (seal density effect) ####
 
-# 1) Define density bins used for observed points
-model_variables_2016_2023 <- model_variables_2016_2023 %>%
-  mutate(density_bin = ntile(avg_density, 8))
-
-# 2) Compute pooled observed MOA_proportion by density bin (black points + binomial CIs)
-observed_density_2016_2023 <- model_variables_2016_2023 %>%
-  group_by(density_bin) %>%
-  summarise(avg_density = mean(avg_density, na.rm = TRUE),
-            n_bin = n(),
-            n_success = sum(count_1_pup, na.rm = TRUE),
-            n_trials = sum(total_resights, na.rm = TRUE),
-            avg_prop = n_success / n_trials,
-            lwr = binom.test(n_success, n_trials)$conf.int[1],
-            upr = binom.test(n_success, n_trials)$conf.int[2],
-            .groups = "drop")
-
-# 3) Define x-axis density values across the observed range
+# 1) Define x-axis density values across the observed range
 density_vals <- seq(min(model_variables_2016_2023$avg_density, na.rm = TRUE), #minimum observed density
                     max(model_variables_2016_2023$avg_density, na.rm = TRUE), #maximum observed density
                     length.out = 100) #number of x-axis values for smooth curve
 
-# 4) Build standardized newdata for each density value D (for post-stratification)
+# 2) Build standardized newdata for each density value D (for post-stratification)
 # For each D, keep the full predictors of model_variables_2016_2023 but overwrite avg_density as if everyone had density D
 nd_by_density <- lapply(density_vals, \(D) transform(model_variables_2016_2023, #preserve covariate distribution and weights
                                                      avg_density = D)) #overwrite avg_density so every row is evaluated at density D
 
-# 5) Post-stratified curve: predict for each density, then compute weighted average using total_resights
+# 3) Post-stratified curve: predict for each density, then compute weighted average using total_resights
 post_curve_density <- function(fit) {
   vapply(seq_along(nd_by_density), function(d){ #loop over density values
     nd <- nd_by_density[[d]] #newdata for one density value
@@ -936,19 +936,19 @@ post_curve_density <- function(fit) {
   }, numeric(1)) #numeric vector of predictions across density values
 }
 
-# 6) Bootstrap CI for the overall density curve using parametric bootstrapping of the fitted GLMM
+# 4) Bootstrap CI for the overall density curve using parametric bootstrapping of the fitted GLMM
 overall_density_2016_2023 <- tibble(avg_density = density_vals, #continuous density values
                                     pred = post_curve_density(mod_age_2016_2023)) #overall post-stratified predictions
 
 boot_density_2016_2023 <- bootMer(mod_age_2016_2023, FUN = post_curve_density, nsim = nsim, #bootstrap curves
                                   type = "parametric", use.u = FALSE) #parametric bootstrap = simulate ranef each time
 
-# 7) Turn bootstrap curves into 95% CI bands
+# 5) Turn bootstrap curves into 95% CI bands
 ci_density_2016_2023 <- overall_density_2016_2023 %>%
   mutate(lo = apply(boot_density_2016_2023$t, 2, quantile, 0.025, na.rm = TRUE), #2.5% quantile at each density value
          hi = apply(boot_density_2016_2023$t, 2, quantile, 0.975, na.rm = TRUE)) #97.5% quantile at each density value
 
-# 8) Make density plot: bootstrap ribbon + weighted mean line + binned observed data by cut_number
+# 6) Make density plot: bootstrap ribbon + weighted mean line + binned observed data by cut_number
 plot_density <- ggplot() +
   geom_ribbon(data = ci_density_2016_2023, #bootstrap CI band for overall curve
               aes(avg_density, ymin = lo, ymax = hi),
@@ -979,7 +979,7 @@ plot_density <- ggplot() +
   labs(x = "Seal density (seals in a 10m radius)",
        y = "Mother-offspring association"); plot_density
 
- ggsave(here("TablesFigures", "Figure3b.png"), plot_density, width = 12, height = 8, dpi = 800)
+ ggsave(here("TablesFigures", "Figure4b.png"), plot_density, width = 12, height = 8, dpi = 800)
 
 ########### Figure 4c (extreme wave and tide effect) ############
 
@@ -1067,7 +1067,7 @@ plot_n_extreme <- ggplot() +
   theme_few(base_size = 28) +
   labs(x = "Number of per-year extreme wave and tide events", y = "Mother-offspring association"); plot_n_extreme
 
-ggsave(here("TablesFigures", "Figure3c.png"), plot_n_extreme, width = 12, height = 8, dpi = 800)
+ggsave(here("TablesFigures", "Figure4c.png"), plot_n_extreme, width = 12, height = 8, dpi = 800)
 
 # SUPPLEMENTARY TABLES AND FIGURES -----------------------------------
 
