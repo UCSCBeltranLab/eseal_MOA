@@ -139,8 +139,8 @@ check_collinearity(mod_wean_mass) #check predictor VIFs
 #### Model 2a: 1996-2025 full dataset model for age ####
 
 ## breakpoint model for age
-## age_cat = "Young", "Old" based on age_senesce
-## age10 = (age - age_senesce) / 10) scaled numeric version of age centered at senescence threshold
+## age_cat = "Young", "Old" based on age_thresh
+## age10 = (age - age_thresh) / 10) scaled numeric version of age centered at senescence threshold
 ## random effects of animalID and year
 
 mod_age_1996_2025 <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
@@ -183,7 +183,7 @@ check_collinearity(mod_age_2016_2023) #check predictor VIFs
 #### Model 3a: 1996-2025 full dataset model for pupping experience ####
 
 ## breakpoint model for experience
-## experience_cat = "inexperienced" or "experienced", based on <5 or >= 5
+## experience_cat = "Inexperienced" or "Experienced", based on exp_thresh
 ## exp10 = (pupping_exp - 5) / 10) scaled numeric version of experience centered at the threshold
 ## random effects of animalID and year
 
@@ -1155,8 +1155,8 @@ make_mod_flextable(mod_exp_2016_2023,
 ### Table S3. Model output from the 1996-2025 piecewise segmented regression for maternal age. ###
 make_mod_flextable(mod_age_1996_2025,
                    predictor_labels = c("(Intercept)" = "Intercept",
-                                        "age_catYoung:age10" = "Maternal age : Pre-threshold (< 9 years)",
-                                        "age_catOld:age10" = "Maternal age : Post-threshold (≥ 9 years)"),
+                                        "age_catYoung:age10" = "Maternal age : Pre-threshold (< 8 years)",
+                                        "age_catOld:age10" = "Maternal age : Post-threshold (≥ 8 years)"),
                    save_path = here("TablesFigures", "mod_age_1996_2025_output.docx"))
 
 ### Table S4. Model output from the 1996-2025 piecewise segmented regression for previous pupping experience. ###
