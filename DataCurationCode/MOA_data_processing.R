@@ -236,7 +236,7 @@ weaner_data <- weaner_data %>%
          days_post_wean = as.numeric(weighingdate - weandate)) %>% #calculate the number of days between weaning and weighing
   filter(days_post_wean >= 0) %>% #only animals weighed as actual weans
   filter(days_post_wean <= 71) %>% #excluding wildly wrong wean dates
-  mutate(Wt_wean_corrected = Wt * exp(0.00596 * days_post_wean)) #back-correction for wean mass based on fasting rate (B. J. Le Boeuf & Crocker, 2005)
+  mutate(Wt_wean_corrected = Wt * exp(0.00596 * days_post_wean)) #back-correction for wean mass based on fasting rate (Le Boeuf & Crocker, 2005)
 
 ##check the remaining duplicates (all the same pup weighed twice post-weaning)
 final_wean_duplicates <- weaner_data %>%
