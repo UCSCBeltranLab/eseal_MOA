@@ -263,3 +263,60 @@ processed_data <- metadata %>%
 ##write final CSV for all modeling variables
 write.csv(processed_data, here("IntermediateData", "MOA_data_pull.csv"), row.names = FALSE, na = "NA")
 
+# Build sensitivity analysis data frame (3-day birth date precision) ---------------
+
+##repeat processing using a stricter birth date precision threshold
+metadata_3day <- raw_data %>%
+  filter(!is.na(birth_date)) %>% #only known birth_date moms
+  filter(precision <= 3) %>% #birth_date estimated within 3 days
+  filter(age <= 24) %>% #remove animals outside normal age range
+  mutate(date = as.Date(date),
+         birth_date = as.Date(birth_date)) %>%
+  group_by(season, animalID) %>%
+  mutate(total_resights = sum(date >= birth_date, na.rm = TRUE), #total post-birth resights
+         count_1_pup = sum(withpup == 1 & date >= birth_date, na.rm = TRUE)) %>% #post-birth 1-pup sightings
+  filter(total_resights >= 14) %>% #keep only animals with sufficient observations
+  ungroup() %>%
+  mutate(MOA_proportion = count_1_pup / total_resights) %>% #calculate mother-offspring association
+  filter(!is.na(MOA_proportion),
+         MOA_proportion > 0)
+
+##assign dominant pupping area for the 3-day dataset
+area_counts_3day <- metadata_3day %>%
+  group_by(animalID, season, area) %>%
+  summarise(count = n(), .groups = "drop")
+
+harem_assignment_3day <- area_counts_3day %>%
+  group_by(animalID, season) %>%
+  filter(count == max(count)) %>%
+  ungroup() %>%
+  select(animalID, season, dominant_area = area)
+
+##assign seal density to each female
+area_density_3day <- seal_density_data %>%
+  rename(dominant_area = Beach) %>%
+  group_by(dominant_area, season) %>%
+  summarise(avg_density = mean(density),
+            .groups = "drop") %>%
+  left_join(harem_assignment_3day,
+            by = c("season", "dominant_area")) %>%
+  filter(!is.na(animalID)) %>%
+  group_by(season, animalID) %>%
+  slice_max(avg_density, with_ties = FALSE) %>%
+  ungroup()
+
+##make final sensitivity dataframe
+processed_data_3day <- metadata_3day %>%
+  select(animalID, season, age, birth_date, pupping_exp,
+         total_resights, count_1_pup, MOA_proportion) %>%
+  distinct(animalID, season, .keep_all = TRUE) %>% #one row per female-year
+  mutate(birth_date = as.Date(birth_date)) %>%
+  left_join(area_density_3day %>% select(animalID, season, dominant_area, avg_density), by = c("animalID", "season")) %>%
+  left_join(tide_wave_flagged %>% select(season, n_extreme_both), by = "season") %>%
+  left_join(weaner_data %>% select(animalID, pupID, season, Wt_wean_corrected), by = c("animalID", "season"))
+
+##write sensitivity dataframe
+write.csv(processed_data_3day, here("IntermediateData", "MOA_data_pull_3day.csv"), row.names = FALSE, na = "NA")
+  
+  
+  

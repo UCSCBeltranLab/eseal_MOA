@@ -56,7 +56,7 @@ nsim <- 100 # keep 100 simulations
 
 model_variables <- read_csv(here("IntermediateData", "MOA_data_pull.csv"), show_col_types = FALSE)
   
-##Setting age threshold and experience threshold (see Tables S6 and S7)
+##Setting age threshold and experience threshold (see Tables S2 and S5)
 age_thresh <- 8
 
 exp_thresh <- 5
@@ -75,8 +75,12 @@ model_variables <- model_variables %>%
 #Summary of the data
 data_summary <- model_variables %>%
   summarise(
+    n_animalIDseason = n(),
+    sum_total_resights = sum(total_resights),
     n_animal_ID = n_distinct(animalID),
     n_season = n_distinct(season),
+    prop_MOA_1 = mean(MOA_proportion == 1),
+    n_MOA_1 = sum(MOA_proportion == 1),
     min_age = min(age),
     max_age = max(age),
     min_exp = min(pupping_exp),
@@ -136,11 +140,24 @@ ranef(mod_wean_mass) #random effect variance for each animalID and season
 simulateResiduals(mod_wean_mass, plot = TRUE) #plot residuals
 check_collinearity(mod_wean_mass) #check predictor VIFs
 
+# Wald 95% CI for the MOA coefficient
+MOA_weanmass_coef_CI <- confint(mod_wean_mass, 
+                       parm = "MOA_proportion",
+                       method = "Wald" )
+
+# Convert coefficient and CI to the effect of a 0.10 increase in MOA
+MOA_weanmass_effect_summary <- tibble(MOA_start = 0.85,
+                             MOA_end = 0.95,
+                             MOA_change = 0.10,
+                             mass_change_kg = fixef(mod_wean_mass)["MOA_proportion"] * 0.10,
+                             CI_lower_kg = MOA_weanmass_coef_CI[1] * 0.10,
+                             CI_upper_kg = MOA_weanmass_coef_CI[2] * 0.10); MOA_weanmass_effect_summary
+
 #### Model 2a: 1996-2025 full dataset model for age ####
 
 ## breakpoint model for age
 ## age_cat = "Young", "Old" based on age_thresh
-## age10 = (age - age_thresh) / 10) scaled numeric version of age centered at senescence threshold
+## age10 = (age - age_thresh) / 10) scaled numeric version of age centered at age threshold
 ## random effects of animalID and year
 
 mod_age_1996_2025 <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
@@ -218,8 +235,6 @@ simulateResiduals(mod_exp_2016_2023, plot = TRUE) #plot residuals
 check_collinearity(mod_exp_2016_2023) #check predictor VIFs
 
 # MAIN FIGURES ----------------------------------------------
-
-#NOTE: this plot is created using data from the full dataframe (metadata), so you need to run MOA_data_processing to recreate
 
 #### Figure 1a (MOA conceptual figure) ####
 
@@ -391,8 +406,6 @@ ggsave(here("TablesFigures", "Figure2.png"), plot_wean, width = 10, height = 8, 
 #### Figure 3a (breakpoint age, 1996-2025) ####
 
 ##Figures for all MOA model predictors use post-stratification to best match model predictions to observed data
-##This means that ...
-
 
 # 1) Set plotting colors for young/old
 AGECOL <- c(Young = "#92BAEE", Old = "#EB99D2")
@@ -534,7 +547,7 @@ post_curve_age_2016_2023 <- function(fit, season = NULL){
 # 5) Thin season curves (one post-stratified curve per season)
 season_lines_age_2016_2023 <- bind_rows(lapply(seasons_2016_2023, \(S)
                                                tibble(season_fct = S, #season grouping
-                                                      age = ages, #x-axis
+                                                      age = ages_2016_2023, #x-axis
                                                       pred = post_curve_age_2016_2023(mod_age_2016_2023, season = S)))) #season-specific predictions
 
 # 6) Overall curve + parametric bootstrap CI
@@ -564,10 +577,10 @@ plot_age_2016_2023 <- ggplot() +
             alpha = 0.4) +
   geom_ribbon(data = ci_age_2016_2023, #bootstrap CI band
               aes(age, ymin = lo, ymax = hi),
-              fill = "#D295E3", alpha = 0.28) +
+              fill = "grey40", alpha = 0.28) +
   geom_line(data = ci_age_2016_2023, #overall predicted curve
             aes(age, pred),
-            color = "#D295E3", linewidth = 1.5) +
+            color = "grey40", linewidth = 1.5) +
   geom_errorbar(data = observed_data_age_2016_2023,
                 aes(age, ymin = lwr, ymax = upr, alpha = error_alpha),
                 width = 0,
@@ -588,7 +601,7 @@ plot_age_2016_2023 <- ggplot() +
 #### Figure 3c (breakpoint pupping experience, 1996-2025)  ####
 
 # 1) Colors for inexperienced/experienced
-EXPCOL <- c(Inexperienced = "#9FD46C", Experienced = "#7C82F1")
+EXPCOL <- c(Inexperienced = "#92BAEE", Experienced = "#EB99D2")
 
 # 2) Define x-axis experience and seasons
 exp_vals <- sort(unique(model_variables$pupping_exp))
@@ -755,10 +768,10 @@ plot_exp_2016_2023 <- ggplot() +
             alpha = 0.3) +
   geom_ribbon(data = ci_exp_2016_2023, #bootstrap CI band
               aes(pupping_exp, ymin = lo, ymax = hi),
-              fill = "#2BB295", alpha = 0.28) +
+              fill = "grey40", alpha = 0.28) +
   geom_line(data = ci_exp_2016_2023, #overall predicted curve
             aes(pupping_exp, pred),
-            color = "#2BB295", linewidth = 1.5) +
+            color = "grey40", linewidth = 1.5) +
   geom_errorbar(data = observed_data_exp_2016_2023,
                 aes(pupping_exp, ymin = lwr, ymax = upr, alpha = error_alpha),
                 width = 0,
@@ -780,47 +793,47 @@ plot_exp_2016_2023 <- ggplot() +
 
 # 1) Left column: age plots
 age_plots <- plot_grid(plot_age_1996_2025 +
-                      theme(axis.title.x = element_blank(),
-                            axis.text.x = element_blank(),
-                            axis.ticks.x = element_blank()),
-                    
-                    plot_age_2016_2023,
-                    ncol = 1,
-                    labels = c("(a)", "(b)"),
-                    label_size = 20,
-                    label_fontface = "bold",
-                    label_x = 0.02,
-                    label_y = 0.98,
-                    hjust = 0,
-                    vjust = 1,
-                    align = "v") #stack age figures
+                         theme(axis.title.x = element_blank(),
+                               axis.text.x = element_blank(),
+                               axis.ticks.x = element_blank()),
+                       
+                       plot_age_2016_2023,
+                       ncol = 1,
+                       labels = c("(a)", "(b)"),
+                       label_size = 20,
+                       label_fontface = "bold",
+                       label_x = 0.02,
+                       label_y = 0.98,
+                       hjust = 0,
+                       vjust = 1,
+                       align = "v") #stack age figures
 
 # 2) Right column: experience plots
 exp_plots <- plot_grid(plot_exp_1996_2025 +
-                      theme(axis.title.x = element_blank(),
-                            axis.text.x = element_blank(),
-                            axis.ticks.x = element_blank(),
-                            axis.title.y = element_blank()), #remove right-column y-axis title
-                    
-                    plot_exp_2016_2023 +
-                      theme(axis.title.y = element_blank()), #remove right-column y-axis title
-                    
-                    ncol = 1,
-                    labels = c("(c)", "(d)"),
-                    label_size = 20,
-                    label_fontface = "bold",
-                    label_x = -0.01,
-                    label_y = 0.98,
-                    hjust = 0,
-                    vjust = 1,
-                    align = "v") #stack experience figures
+                         theme(axis.title.x = element_blank(),
+                               axis.text.x = element_blank(),
+                               axis.ticks.x = element_blank(),
+                               axis.title.y = element_blank()), #remove right-column y-axis title
+                       
+                       plot_exp_2016_2023 +
+                         theme(axis.title.y = element_blank()), #remove right-column y-axis title
+                       
+                       ncol = 1,
+                       labels = c("(c)", "(d)"),
+                       label_size = 20,
+                       label_fontface = "bold",
+                       label_x = -0.01,
+                       label_y = 0.98,
+                       hjust = 0,
+                       vjust = 1,
+                       align = "v") #stack experience figures
 
 # 3) Combine columns
 plot_age_exp <- plot_grid(age_plots, NULL, exp_plots,
                           ncol = 3,
                           align = "hv",
                           axis = "tblr",
-                          rel_widths = c(1, 0.1, 1)) #equal column widths
+                          rel_widths = c(1, 0, 1)) #equal column widths
 plot_age_exp
 
 # 4) Save figure
@@ -1065,13 +1078,484 @@ plot_n_extreme <- ggplot() +
   scale_x_continuous(n.breaks = 6) +
   scale_y_continuous(n.breaks = 3) +
   theme_few(base_size = 28) +
-  labs(x = "Number of per-year extreme wave and tide events", y = "Mother-offspring association"); plot_n_extreme
+  labs(x = "Number of extreme wave and tide events per year", y = "Mother-offspring association"); plot_n_extreme
 
 ggsave(here("TablesFigures", "Figure4c.png"), plot_n_extreme, width = 12, height = 8, dpi = 800)
 
 # SUPPLEMENTARY TABLES AND FIGURES -----------------------------------
 
-#### Tables S1-S5 (model outputs) ####
+#### Table S1 (sensitivity check for 3-day birth date threshold) ####
+
+model_variables_3day <- read_csv(here("IntermediateData", "MOA_data_pull_3day.csv"), show_col_types = FALSE)
+
+##Setting thresholds in data
+model_variables_3day <- model_variables_3day %>%
+  mutate(age_cat = factor(ifelse(age < age_thresh, "Young", "Old"),
+                          levels = c("Young", "Old"))) %>%
+  mutate(age10 = (age - age_thresh) / 10) %>% #scaled numeric version of age centered at the threshold
+  mutate(experience_cat = factor(ifelse(pupping_exp < exp_thresh, "Inexperienced", "Experienced"),
+                                 levels = c("Inexperienced", "Experienced"))) %>%
+  mutate(exp10 = (pupping_exp - exp_thresh) / 10) %>% #scaled numeric version of previous pupping experience centered at the threshold
+  mutate(animalID_fct = factor(animalID), #animalID factor
+         season_fct = factor(season)) #season factor
+
+#make subset dataframe for the 2016-2023 models and figures
+model_variables_3day_2016_2023 <- model_variables_3day %>%
+  filter(!is.na(n_extreme_both)) %>% #no NAs
+  filter(!is.na(avg_density)) %>% #no NAs
+  mutate(season_fct = droplevels(season_fct))
+
+# 1) refit models using 3-day sensitivity dataset
+mod_wean_mass_3day <- lmerTest::lmer(Wt_wean_corrected ~ MOA_proportion + age + (1 | season_fct) + (1 | animalID_fct),
+                                     data = model_variables_3day)
+
+mod_age_1996_2025_3day <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
+                                weights = total_resights,
+                                family = binomial(link = "logit"),
+                                control = glmerControl(optimizer = "bobyqa"),
+                                data = model_variables_3day)
+
+mod_age_2016_2023_3day <- glmer(MOA_proportion ~ age + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                weights = total_resights,
+                                family = binomial(link = "logit"),
+                                control = glmerControl(optimizer = "bobyqa"),
+                                data = model_variables_3day_2016_2023)
+
+mod_exp_1996_2025_3day <- glmer(MOA_proportion ~ experience_cat : exp10 + (1 | animalID_fct) + (1 | season_fct),
+                                weights = total_resights,
+                                family = binomial(link = "logit"),
+                                control = glmerControl(optimizer = "bobyqa"),
+                                data = model_variables_3day)
+
+mod_exp_2016_2023_3day <- glmer(MOA_proportion ~ pupping_exp + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                weights = total_resights,
+                                family = binomial(link = "logit"),
+                                control = glmerControl(optimizer = "bobyqa"),
+                                data = model_variables_3day_2016_2023)
+
+# 2) store models
+models_3day <- list("Weaning mass" = mod_wean_mass_3day,
+                    "Maternal age, 1996–2025" = mod_age_1996_2025_3day,
+                    "Pupping experience, 1996–2025" = mod_exp_1996_2025_3day,
+                    "Maternal age, 2016–2023" = mod_age_2016_2023_3day,
+                    "Pupping experience, 2016–2023" = mod_exp_2016_2023_3day)
+
+# 3) predictor labels
+predictor_labels_3day <- c("(Intercept)" = "Intercept",
+                           "MOA_proportion" = "Mother-offspring association",
+                           "age" = "Maternal age",
+                           "age_catYoung:age10" = "Maternal age : Pre-threshold (< 8 years)",
+                           "age_catOld:age10" = "Maternal age : Post-threshold (≥ 8 years)",
+                           "pupping_exp" = "Previous pupping experience",
+                           "experience_catInexperienced:exp10" = "Previous pupping experience : Pre-threshold (< 5 previous pups)",
+                           "experience_catExperienced:exp10" = "Previous pupping experience : Post-threshold (≥ 5 previous pups)",
+                           "avg_density" = "Seal density",
+                           "n_extreme_both" = "Number of extreme wave and tide events")
+
+# 4) extract all model outputs using same logic as make_mod_flextable
+sensitivity_table_3day <- imap_dfr(models_3day, function(model, model_name) {
+  
+  fixed_tbl <- tidy(model, effects = "fixed") %>%
+    mutate(Model = model_name,
+           Predictor = recode(term, !!!predictor_labels_3day, .default = term),
+           Estimate = as.character(round(estimate, 3)),
+           SE = as.character(round(std.error, 2)),
+           Z = as.character(round(statistic, 3)),
+           p_sci = p.value < 0.001,
+           p_mant = signif(p.value / 10^floor(log10(p.value)), 1),
+           p_exp = floor(log10(p.value)),
+           "P-value" = case_when(
+             p_sci ~ paste0(p_mant, " x 10^", p_exp),
+             TRUE ~ sprintf("%.4f", p.value))) %>%
+    select(Model, Predictor, Estimate, SE, Z,
+           "P-value", p_sci, p_mant, p_exp)
+  
+  random_tbl <- tidy(model, effects = "ran_pars") %>%
+    transmute(Model = model_name,
+              Predictor = paste0("Random effect: ",
+                                 recode(group,
+                                        animalID_fct = "AnimalID",
+                                        season_fct = "Year",
+                                        Residual = "Residual")),
+              Estimate = as.character(round(estimate^2, 3)),
+              SE = "",
+              Z = "",
+              "P-value" = "",
+              p_sci = FALSE,
+              p_mant = NA_real_,
+              p_exp = NA_real_)
+  
+  bind_rows(fixed_tbl, random_tbl)
+})
+
+# 5) make combined flextable
+sensitivity_table_3day_ft <- sensitivity_table_3day %>%
+  select(Model, Predictor, Estimate, SE, Z, "P-value") %>%
+  flextable() %>%
+  merge_v(j = "Model") %>%
+  valign(j = "Model", valign = "top", part = "body") %>%
+  align(align = "center", part = "all") %>%
+  bold(j = "Model", part = "body") %>%
+  autofit()
+
+# 6) format scientific P-values
+sci_rows <- which(sensitivity_table_3day$p_sci %in% TRUE)
+
+if (length(sci_rows) > 0) {
+  sensitivity_table_3day_ft <- flextable::compose(
+    sensitivity_table_3day_ft,
+    i = sci_rows,
+    j = "P-value",
+    value = as_paragraph(
+      as_chunk(sensitivity_table_3day$p_mant[sci_rows]),
+      " × 10",
+      as_sup(as_chunk(sprintf("%.0f",
+                              sensitivity_table_3day$p_exp[sci_rows])))))
+}
+
+sensitivity_table_3day_ft
+
+# 7) save final table
+save_as_docx(sensitivity_table_3day_ft, path = here("TablesFigures", "Table_S1_3day_birth_date_sensitivity.docx"))
+
+#### Table S2 (age threshold comparison) ####
+
+# 1) test all possible thresholds
+age_cutoff <- 5:14
+
+# 2) For each cutoff:
+# a) define Young/Old at a, and center age at a
+# b) fit the same model
+
+age_threshold_test <- function(a) {
+  
+  d <- model_variables %>%
+    mutate(age_cat = factor(if_else(age >= a, "Old", "Young"),
+                            levels = c("Young","Old")), 
+           age10 = (age - a) / 10)
+  
+  m <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
+             weights = total_resights,
+             family = binomial(link="logit"),
+             control = glmerControl(optimizer="bobyqa"),
+             data = d)
+  
+  # 3) Return model fit AIC
+  tibble(Threshold = a,
+         AIC = AIC(m),
+         logLik = as.numeric(logLik(m)))
+}
+
+# 4) Fit all thresholds automatically
+aic_age_threshold_comparison <- map_dfr(age_cutoff, age_threshold_test) %>%
+  mutate(delta_AIC = AIC - min(AIC),
+         AIC_weight = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
+  arrange(Threshold)
+
+age_threshold_comparison_tbl <- aic_age_threshold_comparison %>%
+  transmute("Threshold ages" = Threshold,
+            AIC = round(AIC, 1),
+            "ΔAIC" = round(delta_AIC, 2),
+            "AIC weight" = round(AIC_weight, 3)) %>%
+  arrange("Threshold ages")
+
+# 5) identify best threshold
+best_age_threshold <- age_threshold_comparison_tbl %>%
+  slice_min(AIC, n = 1) %>%
+  pull("Threshold ages")
+
+# 6) make flextable and bold the lowest AIC threshold
+age_threshold_comparison_ft <- flextable(age_threshold_comparison_tbl) %>%
+  align(align = "center", part = "all") %>%
+  bold(i = which(age_threshold_comparison_tbl$"Threshold ages" == best_age_threshold), part = "body"); age_threshold_comparison_ft
+
+save_as_docx(age_threshold_comparison_ft, path = here("TablesFigures", "AIC_Age_Threshold_Comparison.docx"))
+
+#### Table S3 (age linear vs. quadratic vs. breakpoint, 1996-2025) ####
+
+#all use age10 for consistency and to improve convergence
+
+### threshold ###
+
+mod_age_thresh_1996_2025 <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link= "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_age_thresh_1996_2025) #model summary
+
+### linear ###
+
+mod_age_linear_1996_2025 <- glmer(MOA_proportion ~ age10 + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link= "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_age_linear_1996_2025) #model summary
+
+### quadratic ###
+
+mod_age_quad_1996_2025 <- glmer(MOA_proportion ~ age10 + I(age10^2) + (1 | animalID_fct) + (1 | season_fct),
+                                weights = total_resights,
+                                family = binomial(link= "logit"),
+                                control = glmerControl(optimizer = "bobyqa"),
+                                data = model_variables); summary(mod_age_quad_1996_2025) #model summary
+
+## name models to compare
+mod_age_comparisons_1996_2025 <- list(Linear = mod_age_linear_1996_2025,
+                                      Quadratic = mod_age_quad_1996_2025,
+                                      Threshold = mod_age_thresh_1996_2025)
+
+# 2) make table with AIC comparisons
+aic_table_age_1996_2025 <- tibble(Model = names(mod_age_comparisons_1996_2025),
+                                  AIC = sapply(mod_age_comparisons_1996_2025, AIC)) %>%
+  mutate(delta_AIC = AIC - min(AIC),
+         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
+  arrange(delta_AIC)
+
+# 3) relabel table for formatting
+aic_table_age_1996_2025 <- aic_table_age_1996_2025 %>%
+  transmute(Model = Model,
+            AIC = round(AIC, 1),
+            "ΔAIC" = round(delta_AIC, 2),
+            "AIC weight" = round(aic_weights, 3)) %>%
+  arrange("ΔAIC")
+
+best_model <- aic_table_age_1996_2025$Model[1] #best model is the one with lowest AIC difference
+
+# 4) make flextable
+aic_table_age_1996_2025 <- flextable(aic_table_age_1996_2025) %>%
+  align(align = "center", part = "all") %>%
+  bold(i = which(aic_table_age_1996_2025$Model == best_model), #bold best model
+       part = "body"); aic_table_age_1996_2025
+
+#save final table
+save_as_docx(aic_table_age_1996_2025, path = here("TablesFigures", "2016_2023_Age_Predictor_Comparison.docx"))
+
+#### Table S4 (experience linear vs. quadratic vs. breakpoint, 1996-2025) ####
+
+### threshold ###
+
+mod_exp_thresh_1996_2025 <- glmer(MOA_proportion ~ experience_cat : exp10 + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link = "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_exp_thresh_1996_2025)
+
+
+### linear ###
+
+mod_exp_linear_1996_2025 <- glmer(MOA_proportion ~ exp10 + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link = "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_exp_linear_1996_2025)
+
+### quadratic ###
+
+mod_exp_quad_1996_2025 <- glmer(MOA_proportion ~ exp10 + I(exp10^2) + (1 | animalID_fct) + (1 | season_fct),
+                                weights = total_resights,
+                                family = binomial(link = "logit"),
+                                control = glmerControl(optimizer = "bobyqa"),
+                                data = model_variables); summary(mod_exp_quad_1996_2025)
+
+# 1) name models to compare
+mod_exp_comparisons_1996_2025 <- list(Linear = mod_exp_linear_1996_2025,
+                                      Quadratic = mod_exp_quad_1996_2025,
+                                      Threshold = mod_exp_thresh_1996_2025)
+
+# 2) make table with AIC comparisons
+aic_table_exp_1996_2025 <- tibble(Model = names(mod_exp_comparisons_1996_2025),
+                                  AIC = sapply(mod_exp_comparisons_1996_2025, AIC),
+                                  K = sapply(mod_exp_comparisons_1996_2025, function(m) attr(logLik(m), "df"))) %>%
+  mutate(delta_AIC = AIC - min(AIC),
+         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
+  arrange(delta_AIC)
+
+# 3) relabel table for formatting
+aic_table_exp_1996_2025 <- aic_table_exp_1996_2025 %>%
+  transmute(Model = Model, 
+            AIC = round(AIC, 1),
+            "ΔAIC" = round(delta_AIC, 2),
+            "AIC weight" = round(aic_weights, 3)) %>%
+  arrange("ΔAIC")
+
+best_model <- aic_table_exp_1996_2025$Model[1] #best model is the one with lowest AIC difference
+
+# 4) make flextable
+aic_table_exp_1996_2025 <- flextable(aic_table_exp_1996_2025) %>%
+  align(align = "center", part = "all") %>%
+  bold(i = which(aic_table_exp_1996_2025$Model == best_model), #bold lowest AIC model
+       part = "body"); aic_table_exp_1996_2025
+
+#save final table
+save_as_docx(aic_table_exp_1996_2025, path = here("TablesFigures", "1996_2025_Experience_Predictor_Comparison.docx"))
+
+#### Table S5 (experience threshold comparison) ####
+
+# 1) test all possible experience thresholds
+exp_cutoff <- 1:11
+
+# 2) For each cutoff:
+# a) define inexperienced vs. experienced at a, and center experience at a
+# b) fit the same model
+
+threshold_test_exp <- function(a) {
+  
+  d <- model_variables %>%
+    mutate(experience_cat = factor(if_else(pupping_exp >= a, "Experienced", "Inexperienced"),
+                                   levels = c("Inexperienced", "Experienced")),
+           exp10 = (pupping_exp - a) / 10)
+  
+  m <- glmer(MOA_proportion ~ experience_cat : exp10 + (1 | animalID_fct) + (1 | season_fct),
+             weights = total_resights,
+             family = binomial(link = "logit"),
+             control = glmerControl(optimizer = "bobyqa"),
+             data = d)
+  # 3) Return model fit AIC
+  tibble(Threshold = a,
+         AIC = AIC(m),
+         logLik = as.numeric(logLik(m)))
+}
+
+# 4) Fit all thresholds automatically
+aic_experience_threshold_comparison <- map_dfr(exp_cutoff, threshold_test_exp) %>%
+  mutate(delta_AIC = AIC - min(AIC),
+         AIC_weight = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
+  arrange(Threshold)
+
+exp_threshold_comparison_tbl <- aic_experience_threshold_comparison %>%
+  transmute("Threshold experience levels" = Threshold,
+            AIC = round(AIC, 1),
+            "ΔAIC" = round(delta_AIC, 2),
+            "AIC weight" = round(AIC_weight, 3)) %>%
+  arrange("Threshold experience levels")
+
+# 5) identify best threshold
+best_threshold <- exp_threshold_comparison_tbl %>%
+  slice_min(AIC, n = 1) %>%
+  pull("Threshold experience levels")
+
+# 6) bold the lowest AIC threshold
+exp_threshold_comparison_ft <- flextable(exp_threshold_comparison_tbl) %>%
+  align(align = "center", part = "all") %>%
+  bold(i = which(exp_threshold_comparison_tbl$"Threshold experience levels" == best_threshold), part = "body"); exp_threshold_comparison_ft
+
+save_as_docx(exp_threshold_comparison_ft, path = here("TablesFigures", "AIC_Experience_Threshold_Comparison.docx"))
+
+#### Table S6 (age linear vs. quadratic vs. breakpoint, 2016-2023) ####
+
+### threshold ###
+
+mod_age_thresh_2016_2023 <- glmer(MOA_proportion ~ age_cat : age10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link= "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_age_thresh_2016_2023) #model summary
+
+### linear ###
+
+mod_age_linear_2016_2023 <- glmer(MOA_proportion ~ age10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link= "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_age_linear_2016_2023) #model summary
+
+### quadratic ###
+
+mod_age_quad_2016_2023 <- glmer(MOA_proportion ~ age10 + I(age10^2) + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                weights = total_resights,
+                                family = binomial(link= "logit"),
+                                control = glmerControl(optimizer = "bobyqa"),
+                                data = model_variables); summary(mod_age_quad_2016_2023) #model summary
+
+# 1) name models to compare
+mod_age_comparisons_2016_2023 <- list(Linear = mod_age_linear_2016_2023,
+                                      Quadratic = mod_age_quad_2016_2023,
+                                      Threshold = mod_age_thresh_2016_2023)
+
+# 2) make table with AIC comparisons
+aic_table_age_2016_2023 <- tibble(Model = names(mod_age_comparisons_2016_2023),
+                                  AIC = sapply(mod_age_comparisons_2016_2023, AIC)) %>%
+  mutate(delta_AIC = AIC - min(AIC),
+         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
+  arrange(delta_AIC)
+
+# 3) relabel table for formatting
+aic_table_age_2016_2023 <- aic_table_age_2016_2023 %>%
+  transmute(Model = Model,
+            AIC = round(AIC, 1),
+            "ΔAIC" = round(delta_AIC, 2),
+            "AIC weight" = round(aic_weights, 3)) %>%
+  arrange("ΔAIC")
+
+best_model <- aic_table_age_2016_2023$Model[1] #best model is the one with lowest AIC difference
+
+# 4) make flextable
+aic_table_age_2016_2023 <- flextable(aic_table_age_2016_2023) %>%
+  align(align = "center", part = "all") %>%
+  bold(i = which(aic_table_age_2016_2023$Model == best_model), #bold lowest AIC model
+       part = "body"); aic_table_age_2016_2023
+
+#save final table
+save_as_docx(aic_table_age_2016_2023, path = here("TablesFigures", "2016_2023_Age_Predictor_Comparison.docx"))
+
+############ Table S7 (experience linear vs. quadratic vs. breakpoint, 2016-2023) ##################
+
+### threshold ###
+
+mod_exp_thresh_2016_2023 <- glmer(MOA_proportion ~ experience_cat : exp10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link= "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_exp_thresh_2016_2023) #model summary
+
+### linear ###
+
+mod_exp_linear_2016_2023 <- glmer(MOA_proportion ~ exp10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                  weights = total_resights,
+                                  family = binomial(link = "logit"),
+                                  control = glmerControl(optimizer = "bobyqa"),
+                                  data = model_variables); summary(mod_exp_linear_2016_2023)
+
+### quadratic ###
+
+mod_exp_quad_2016_2023 <- glmer(MOA_proportion ~ exp10 + I(exp10^2) + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
+                                weights = total_resights,
+                                family = binomial(link = "logit"),
+                                control = glmerControl(optimizer = "bobyqa"),
+                                data = model_variables); summary(mod_exp_quad_2016_2023)
+
+# 1) name models to compare
+mod_exp_comparisons_2016_2023 <- list(Linear = mod_exp_linear_2016_2023,
+                                      Quadratic = mod_exp_quad_2016_2023,
+                                      Threshold = mod_exp_thresh_2016_2023)
+
+# 2) make table with AIC comparisons
+aic_table_exp_2016_2023 <- tibble(Model = names(mod_exp_comparisons_2016_2023),
+                                  AIC = sapply(mod_exp_comparisons_2016_2023, AIC)) %>%
+  mutate(delta_AIC = AIC - min(AIC),
+         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
+  arrange(delta_AIC)
+
+# 3) relabel table for formatting
+aic_table_exp_2016_2023 <- aic_table_exp_2016_2023 %>%
+  transmute(Model = Model,
+            AIC = round(AIC, 1),
+            "ΔAIC" = round(delta_AIC, 2),
+            "AIC weight" = round(aic_weights, 3)) %>%
+  arrange("ΔAIC")
+
+best_model <- aic_table_exp_2016_2023$Model[1] #best model is the one with lowest AIC difference
+
+# 4) make flextable
+aic_table_exp_2016_2023 <- flextable(aic_table_exp_2016_2023) %>%
+  align(align = "center", part = "all") %>%
+  bold(i = which(aic_table_exp_2016_2023$Model == best_model), #bold lowest AIC model
+       part = "body"); aic_table_exp_2016_2023
+
+#save final table
+save_as_docx(aic_table_exp_2016_2023, path = here("TablesFigures", "2016_2023_Experience_Predictor_Comparison.docx"))
+
+#### Tables S8-S12 (model outputs) ####
 
 # 1) model output table function
 make_mod_flextable <- function(model, #extract fixed effects from model
@@ -1136,7 +1620,28 @@ make_mod_flextable <- function(model, #extract fixed effects from model
   return(ft)
 }
 
-### Table S1: Model output from the 2016-2023 model with maternal age. ###
+### Table S8: Model output for the effects of maternal age and mother-offspring association on offspring weaning mass. ###
+make_mod_flextable(mod_wean_mass,
+                   predictor_labels = c("(Intercept)" = "Intercept",
+                                        "MOA_proportion" = "Mother-offspring association",
+                                        "age" = "Maternal age"),
+                   save_path = here("TablesFigures", "mod_wean_mass_output.docx"))
+
+### Table S9: Model output from the 1996-2025 piecewise segmented regression for maternal age. ###
+make_mod_flextable(mod_age_1996_2025,
+                   predictor_labels = c("(Intercept)" = "Intercept",
+                                        "age_catYoung:age10" = "Maternal age : Pre-threshold (< 8 years)",
+                                        "age_catOld:age10" = "Maternal age : Post-threshold (≥ 8 years)"),
+                   save_path = here("TablesFigures", "mod_age_1996_2025_output.docx"))
+
+### Table S10: Model output from the 1996-2025 piecewise segmented regression for previous pupping experience. ###
+make_mod_flextable(mod_exp_1996_2025,
+                   predictor_labels = c("(Intercept)" = "Intercept",
+                                        "experience_catInexperienced:exp10" = "Previous pupping experience : Pre-threshold (< 5 previous pups)",
+                                        "experience_catExperienced:exp10" = "Previous pupping experience : Post-threshold (≥ 5 previous pups)"),
+                   save_path = here("TablesFigures", "mod_exp_1996_2025_output.docx"))
+
+### Table S11: Model output from the 2016-2023 model with maternal age. ###
 make_mod_flextable(mod_age_2016_2023,
                    predictor_labels = c("(Intercept)" = "Intercept",
                                         "age" = "Maternal age",
@@ -1144,371 +1649,13 @@ make_mod_flextable(mod_age_2016_2023,
                                         "avg_density" = "Seal density"),
                    save_path = here("TablesFigures", "mod_age_2016_2023_output.docx"))
 
-### Table S2. Model output from the 2016-2023 model with previous pupping experience ###
+### Table S12: Model output from the 2016-2023 model with previous pupping experience ###
 make_mod_flextable(mod_exp_2016_2023,
                    predictor_labels = c("(Intercept)" = "Intercept",
                                         "pupping_exp" = "Previous pupping experience",
                                         "n_extreme_both" = "Number of extreme wave and tide events",
                                         "avg_density" = "Seal density"),
                    save_path = here("TablesFigures", "mod_exp_2016_2023_output.docx"))
-
-### Table S3. Model output from the 1996-2025 piecewise segmented regression for maternal age. ###
-make_mod_flextable(mod_age_1996_2025,
-                   predictor_labels = c("(Intercept)" = "Intercept",
-                                        "age_catYoung:age10" = "Maternal age : Pre-threshold (< 8 years)",
-                                        "age_catOld:age10" = "Maternal age : Post-threshold (≥ 8 years)"),
-                   save_path = here("TablesFigures", "mod_age_1996_2025_output.docx"))
-
-### Table S4. Model output from the 1996-2025 piecewise segmented regression for previous pupping experience. ###
-make_mod_flextable(mod_exp_1996_2025,
-                   predictor_labels = c("(Intercept)" = "Intercept",
-                                        "experience_catInexperienced:exp10" = "Previous pupping experience : Pre-threshold (< 5 previous pups)",
-                                        "experience_catExperienced:exp10" = "Previous pupping experience : Post-threshold (≥ 5 previous pups)"),
-                   save_path = here("TablesFigures", "mod_exp_1996_2025_output.docx"))
-
-### Table S5. Model output for the effects of maternal age and mother-offspring association on offspring weaning mass. ###
-make_mod_flextable(mod_wean_mass,
-                   predictor_labels = c("(Intercept)" = "Intercept",
-                                        "MOA_proportion" = "Mother-offspring association",
-                                        "age" = "Maternal age"),
-                   save_path = here("TablesFigures", "mod_wean_mass_output.docx"))
-
-#### Table S6 (age threshold comparison) ####
-
-# 1) test all possible thresholds
-age_cutoff <- 5:14
-
-# 2) For each cutoff:
-# a) define Young/Old at a, and center age at a
-# b) fit the same model
-
-age_threshold_test <- function(a) {
-  
-  d <- model_variables %>%
-    mutate(age_cat = factor(if_else(age >= a, "Old", "Young"),
-                            levels = c("Young","Old")), 
-           age10 = (age - a) / 10)
-  
-  m <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
-             weights = total_resights,
-             family = binomial(link="logit"),
-             control = glmerControl(optimizer="bobyqa"),
-             data = d)
-  
-  # 3) Return model fit AIC
-  tibble(Threshold = a,
-         AIC = AIC(m),
-         logLik = as.numeric(logLik(m)))
-}
-
-# 4) Fit all thresholds automatically
-aic_age_threshold_comparison <- map_dfr(age_cutoff, age_threshold_test) %>%
-  mutate(delta_AIC = AIC - min(AIC),
-         AIC_weight = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
-  arrange(Threshold)
-
-age_threshold_comparison_tbl <- aic_age_threshold_comparison %>%
-  transmute("Threshold ages" = Threshold,
-            AIC = round(AIC, 1),
-            "ΔAIC" = round(delta_AIC, 2),
-            "AIC weight" = round(AIC_weight, 3)) %>%
-  arrange("Threshold ages")
-
-# 5) identify best threshold
-best_age_threshold <- age_threshold_comparison_tbl %>%
-  slice_min(AIC, n = 1) %>%
-  pull("Threshold ages")
-
-# 6) make flextable and bold the lowest AIC threshold
-age_threshold_comparison_ft <- flextable(age_threshold_comparison_tbl) %>%
-  align(align = "center", part = "all") %>%
-  bold(i = which(age_threshold_comparison_tbl$"Threshold ages" == best_age_threshold), part = "body"); age_threshold_comparison_ft
-
-save_as_docx(age_threshold_comparison_ft, path = here("TablesFigures", "AIC_Age_Threshold_Comparison.docx"))
-
-#### Table S7 (experience threshold comparison) ####
-
-# 1) test all possible experience thresholds
-exp_cutoff <- 1:11
-
-# 2) For each cutoff:
-# a) define inexperienced vs. experienced at a, and center experience at a
-# b) fit the same model
-
-threshold_test_exp <- function(a) {
-  
-  d <- model_variables %>%
-    mutate(experience_cat = factor(if_else(pupping_exp >= a, "Experienced", "Inexperienced"),
-                                   levels = c("Inexperienced", "Experienced")),
-           exp10 = (pupping_exp - a) / 10)
-  
-  m <- glmer(MOA_proportion ~ experience_cat : exp10 + (1 | animalID_fct) + (1 | season_fct),
-             weights = total_resights,
-             family = binomial(link = "logit"),
-             control = glmerControl(optimizer = "bobyqa"),
-             data = d)
-  # 3) Return model fit AIC
-  tibble(Threshold = a,
-         AIC = AIC(m),
-         logLik = as.numeric(logLik(m)))
-}
-
-# 4) Fit all thresholds automatically
-aic_experience_threshold_comparison <- map_dfr(exp_cutoff, threshold_test_exp) %>%
-  mutate(delta_AIC = AIC - min(AIC),
-         AIC_weight = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
-  arrange(Threshold)
-
-exp_threshold_comparison_tbl <- aic_experience_threshold_comparison %>%
-  transmute("Threshold experience levels" = Threshold,
-            AIC = round(AIC, 1),
-            "ΔAIC" = round(delta_AIC, 2),
-            "AIC weight" = round(AIC_weight, 3)) %>%
-  arrange("Threshold experience levels")
-
-# 5) identify best threshold
-best_threshold <- exp_threshold_comparison_tbl %>%
-  slice_min(AIC, n = 1) %>%
-  pull("Threshold experience levels")
-
-# 6) bold the lowest AIC threshold
-exp_threshold_comparison_ft <- flextable(exp_threshold_comparison_tbl) %>%
-  align(align = "center", part = "all") %>%
-  bold(i = which(exp_threshold_comparison_tbl$"Threshold experience levels" == best_threshold), part = "body"); exp_threshold_comparison_ft
-
-save_as_docx(exp_threshold_comparison_ft, path = here("TablesFigures", "AIC_Experience_Threshold_Comparison.docx"))
-
-#### Table S8 (age linear vs. quadratic vs. breakpoint, 1996-2025) ####
-
-#all use age10 for consistency and to improve convergence
-
-### threshold ###
-
-mod_age_thresh_1996_2025 <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link= "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_age_thresh_1996_2025) #model summary
-
-### linear ###
-
-mod_age_linear_1996_2025 <- glmer(MOA_proportion ~ age10 + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link= "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_age_linear_1996_2025) #model summary
-
-### quadratic ###
-
-mod_age_quad_1996_2025 <- glmer(MOA_proportion ~ age10 + I(age10^2) + (1 | animalID_fct) + (1 | season_fct),
-                                weights = total_resights,
-                                family = binomial(link= "logit"),
-                                control = glmerControl(optimizer = "bobyqa"),
-                                data = model_variables); summary(mod_age_quad_1996_2025) #model summary
-
-## name models to compare
-mod_age_comparisons_1996_2025 <- list(Linear = mod_age_linear_1996_2025,
-                                      Quadratic = mod_age_quad_1996_2025,
-                                      Threshold = mod_age_thresh_1996_2025)
-
-# 2) make table with AIC comparisons
-aic_table_age_1996_2025 <- tibble(Model = names(mod_age_comparisons_1996_2025),
-                                  AIC = sapply(mod_age_comparisons_1996_2025, AIC)) %>%
-  mutate(delta_AIC = AIC - min(AIC),
-         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
-  arrange(delta_AIC)
-
-# 3) relabel table for formatting
-aic_table_age_1996_2025 <- aic_table_age_1996_2025 %>%
-  transmute(Model = Model,
-            AIC = round(AIC, 1),
-            "ΔAIC" = round(delta_AIC, 2),
-            "AIC weight" = round(aic_weights, 3)) %>%
-  arrange("ΔAIC")
-
-best_model <- aic_table_age_1996_2025$Model[1] #best model is the one with lowest AIC difference
-
-# 4) make flextable
-aic_table_age_1996_2025 <- flextable(aic_table_age_1996_2025) %>%
-  align(align = "center", part = "all") %>%
-  bold(i = which(aic_table_age_1996_2025$Model == best_model), #bold best model
-       part = "body"); aic_table_age_1996_2025
-
-#save final table
-save_as_docx(aic_table_age_1996_2025, path = here("TablesFigures", "2016_2023_Age_Predictor_Comparison.docx"))
-
-#### Table S9 (age linear vs. quadratic vs. breakpoint, 2016-2023) ####
-
-### threshold ###
-
-mod_age_thresh_2016_2023 <- glmer(MOA_proportion ~ age_cat : age10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link= "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_age_thresh_2016_2023) #model summary
-
-### linear ###
-
-mod_age_linear_2016_2023 <- glmer(MOA_proportion ~ age10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link= "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_age_linear_2016_2023) #model summary
-
-### quadratic ###
-
-mod_age_quad_2016_2023 <- glmer(MOA_proportion ~ age10 + I(age10^2) + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                weights = total_resights,
-                                family = binomial(link= "logit"),
-                                control = glmerControl(optimizer = "bobyqa"),
-                                data = model_variables); summary(mod_age_quad_2016_2023) #model summary
-
-# 1) name models to compare
-mod_age_comparisons_2016_2023 <- list(Linear = mod_age_linear_2016_2023,
-                                      Quadratic = mod_age_quad_2016_2023,
-                                      Threshold = mod_age_thresh_2016_2023)
-
-# 2) make table with AIC comparisons
-aic_table_age_2016_2023 <- tibble(Model = names(mod_age_comparisons_2016_2023),
-                                  AIC = sapply(mod_age_comparisons_2016_2023, AIC)) %>%
-  mutate(delta_AIC = AIC - min(AIC),
-         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
-  arrange(delta_AIC)
-
-# 3) relabel table for formatting
-aic_table_age_2016_2023 <- aic_table_age_2016_2023 %>%
-  transmute(Model = Model,
-            AIC = round(AIC, 1),
-            "ΔAIC" = round(delta_AIC, 2),
-            "AIC weight" = round(aic_weights, 3)) %>%
-  arrange("ΔAIC")
-
-best_model <- aic_table_age_2016_2023$Model[1] #best model is the one with lowest AIC difference
-
-# 4) make flextable
-aic_table_age_2016_2023 <- flextable(aic_table_age_2016_2023) %>%
-  align(align = "center", part = "all") %>%
-  bold(i = which(aic_table_age_2016_2023$Model == best_model), #bold lowest AIC model
-       part = "body"); aic_table_age_2016_2023
-
-#save final table
-save_as_docx(aic_table_age_2016_2023, path = here("TablesFigures", "2016_2023_Age_Predictor_Comparison.docx"))
-
-#### Table S10 (experience linear vs. quadratic vs. breakpoint, 1996-2025) ####
-
-### threshold ###
-
-mod_exp_thresh_1996_2025 <- glmer(MOA_proportion ~ experience_cat : exp10 + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link = "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_exp_thresh_1996_2025)
-
-
-### linear ###
-
-mod_exp_linear_1996_2025 <- glmer(MOA_proportion ~ exp10 + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link = "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_exp_linear_1996_2025)
-
-### quadratic ###
-
-mod_exp_quad_1996_2025 <- glmer(MOA_proportion ~ exp10 + I(exp10^2) + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link = "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_exp_quad_1996_2025)
-
-# 1) name models to compare
-mod_exp_comparisons_1996_2025 <- list(Linear = mod_exp_linear_1996_2025,
-                                      Quadratic = mod_exp_quad_1996_2025,
-                                      Threshold = mod_exp_thresh_1996_2025)
-
-# 2) make table with AIC comparisons
-aic_table_exp_1996_2025 <- tibble(Model = names(mod_exp_comparisons_1996_2025),
-                                  AIC = sapply(mod_exp_comparisons_1996_2025, AIC),
-                                  K = sapply(mod_exp_comparisons_1996_2025, function(m) attr(logLik(m), "df"))) %>%
-  mutate(delta_AIC = AIC - min(AIC),
-         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
-  arrange(delta_AIC)
-
-# 3) relabel table for formatting
-aic_table_exp_1996_2025 <- aic_table_exp_1996_2025 %>%
-  transmute(Model = Model, 
-            AIC = round(AIC, 1),
-            "ΔAIC" = round(delta_AIC, 2),
-            "AIC weight" = round(aic_weights, 3)) %>%
-  arrange("ΔAIC")
-
-best_model <- aic_table_exp_1996_2025$Model[1] #best model is the one with lowest AIC difference
-
-# 4) make flextable
-aic_table_exp_1996_2025 <- flextable(aic_table_exp_1996_2025) %>%
-  align(align = "center", part = "all") %>%
-  bold(i = which(aic_table_exp_1996_2025$Model == best_model), #bold lowest AIC model
-       part = "body"); aic_table_exp_1996_2025
-
-#save final table
-save_as_docx(aic_table_exp_1996_2025, path = here("TablesFigures", "1996_2025_Experience_Predictor_Comparison.docx"))
-
-############ Table S11 (experience linear vs. quadratic vs. breakpoint, 2016-2023) ##################
-
-### threshold ###
-
-mod_exp_thresh_2016_2023 <- glmer(MOA_proportion ~ experience_cat : exp10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link= "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_exp_thresh_2016_2023) #model summary
-
-### linear ###
-
-mod_exp_linear_2016_2023 <- glmer(MOA_proportion ~ exp10 + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                  weights = total_resights,
-                                  family = binomial(link = "logit"),
-                                  control = glmerControl(optimizer = "bobyqa"),
-                                  data = model_variables); summary(mod_exp_linear_2016_2023)
-
-### quadratic ###
-
-mod_exp_quad_2016_2023 <- glmer(MOA_proportion ~ exp10 + I(exp10^2) + avg_density + n_extreme_both + (1 | animalID_fct) + (1 | season_fct),
-                                weights = total_resights,
-                                family = binomial(link = "logit"),
-                                control = glmerControl(optimizer = "bobyqa"),
-                                data = model_variables); summary(mod_exp_quad_2016_2023)
-
-# 1) name models to compare
-mod_exp_comparisons_2016_2023 <- list(Linear = mod_exp_linear_2016_2023,
-                                      Quadratic = mod_exp_quad_2016_2023,
-                                      Threshold = mod_exp_thresh_2016_2023)
-
-# 2) make table with AIC comparisons
-aic_table_exp_2016_2023 <- tibble(Model = names(mod_exp_comparisons_2016_2023),
-                                  AIC = sapply(mod_exp_comparisons_2016_2023, AIC)) %>%
-  mutate(delta_AIC = AIC - min(AIC),
-         aic_weights = exp(-0.5 * delta_AIC) / sum(exp(-0.5 * delta_AIC))) %>%
-  arrange(delta_AIC)
-
-# 3) relabel table for formatting
-aic_table_exp_2016_2023 <- aic_table_exp_2016_2023 %>%
-  transmute(Model = Model,
-            AIC = round(AIC, 1),
-            "ΔAIC" = round(delta_AIC, 2),
-            "AIC weight" = round(aic_weights, 3)) %>%
-  arrange("ΔAIC")
-
-best_model <- aic_table_exp_2016_2023$Model[1] #best model is the one with lowest AIC difference
-
-# 4) make flextable
-aic_table_exp_2016_2023 <- flextable(aic_table_exp_2016_2023) %>%
-  align(align = "center", part = "all") %>%
-  bold(i = which(aic_table_exp_2016_2023$Model == best_model), #bold lowest AIC model
-       part = "body"); aic_table_exp_2016_2023
-
-#save final table
-save_as_docx(aic_table_exp_2016_2023, path = here("TablesFigures", "2016_2023_Experience_Predictor_Comparison.docx"))
 
 #### Figure S1 (variation in pupping experience within ages) ####
 
@@ -1617,7 +1764,7 @@ plot_n_extreme_jitter <- ggplot() +
   scale_y_continuous(n.breaks = 5) +
   coord_cartesian(ylim = c(0, 1), clip = "off") +
   theme_few(base_size = 18) +
-  labs(x = "Number of per-year extreme wave and tide events",
+  labs(x = "Number of extreme wave and tide events per year",
        y = "Mother-offspring association"); plot_n_extreme_jitter
 
 ggsave(here("TablesFigures", "FigureS3.png"), plot_n_extreme_jitter, width = 12, height = 8, dpi = 800)
