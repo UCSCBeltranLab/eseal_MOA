@@ -1731,11 +1731,11 @@ plot_density_jitter <- ggplot() +
   scale_color_viridis_c(option = "mako",
                         direction = -1,
                         limits = density_limits,
-                        name = "Conspecific density") +
+                        name = "Seal density") +
   scale_size_continuous(name = "Observations") +
   coord_cartesian(ylim = c(0, 1.01), clip = "off") +
   theme_few(base_size = 18) +
-  labs(x = "Conspecific density (seals in a 10m radius)",
+  labs(x = "Seal density (seals in a 10m radius)",
        y = "Mother-offspring association"); plot_density_jitter
 
 ggsave(here("TablesFigures", "FigureS2.png"), plot_density_jitter, width = 12, height = 8, dpi = 800)
