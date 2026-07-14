@@ -601,7 +601,7 @@ plot_age_2016_2023 <- ggplot() +
 #### Figure 3c (breakpoint pupping experience, 1996-2025)  ####
 
 # 1) Colors for inexperienced/experienced
-EXPCOL <- c(Inexperienced = "#92BAEE", Experienced = "#EB99D2")
+EXPCOL <- c(Inexperienced = "#9FD46C", Experienced   = "#7C82F1")
 
 # 2) Define x-axis experience and seasons
 exp_vals <- sort(unique(model_variables$pupping_exp))
