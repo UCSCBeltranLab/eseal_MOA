@@ -109,6 +109,14 @@ harem_assignment <- area_counts %>%
   ungroup() %>%
   select(animalID, season, dominant_area = area) #call dominant area to avoid confusion
 
+# Calculate lactation duration for each animal in our dataset
+metadata <- metadata %>%
+  group_by(animalID, season) %>%
+  mutate(birth_date = first(birth_date),
+         last_date = max(date, na.rm = TRUE),
+         lactation_duration = as.numeric(last_date - birth_date)) %>%
+  ungroup()
+
 # Wave and tide processing -----------------------------------
 
 # 1) Rebuild date/time columns from CSV
@@ -253,7 +261,7 @@ weaner_data <- weaner_data %>%
 
 ##make table with all necessary variables for analyses and figures
 processed_data <- metadata %>%
-  select(animalID, season, age, birth_date, pupping_exp, total_resights, count_1_pup, MOA_proportion) %>%
+  select(animalID, season, age, birth_date, lactation_duration, pupping_exp, total_resights, count_1_pup, MOA_proportion) %>%
   distinct(animalID, season, .keep_all = TRUE) %>% #only 1 row per animalID-season
   mutate(birth_date = as.Date(birth_date)) %>%
   left_join(area_density %>% select(animalID, season, dominant_area, avg_density), by = c("animalID", "season")) %>%
@@ -317,6 +325,4 @@ processed_data_3day <- metadata_3day %>%
 
 ##write sensitivity dataframe
 write.csv(processed_data_3day, here("IntermediateData", "MOA_data_pull_3day.csv"), row.names = FALSE, na = "NA")
-  
-  
   

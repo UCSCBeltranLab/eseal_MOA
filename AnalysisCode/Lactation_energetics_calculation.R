@@ -2,9 +2,13 @@ library(tidyverse)
 
 # 1. McHuron milk intake curve --------------------
 
-# S3 from McHuron (2026) contains predicted mass-specific milk intake:
+# Table S3 from McHuron (2026) contains predicted mass-specific milk intake
+# DOI: 10.1371/journal.pone.0352443 
+
 # g milk day^-1 g pup^-0.82
 s3 <- read_csv(here("IntermediateData", "McHuron_S3_table.csv"), show_col_types =  FALSE)
+
+model_variables <- read_csv(here("IntermediateData", "MOA_data_pull.csv"), show_col_types = FALSE)
 
 # Average milk intake predictions for northern elephant seals across lactation
 nes_curve <- s3 %>%
@@ -15,20 +19,10 @@ nes_curve <- s3 %>%
             upper_rate = mean(upper_ci, na.rm = TRUE),
             .groups = "drop")
 
-# Calculate lactation duration for each animal in our dataset
-lactation_duration <- metadata %>%
-  mutate(date = as.Date(date),
-         birth_date = as.Date(birth_date)) %>%
-  group_by(animalID, season) %>%
-  summarise(birth_date = first(birth_date),
-            last_date = max(date, na.rm = TRUE),
-            lactation_days = as.numeric(last_date - birth_date),
-            .groups = "drop") 
-
 # Biological assumptions
 birth_mass_kg <- 40 #from Ortiz et al. 1984
 mass_gain_kg <- 91.4 #from Ortiz et al. 1984
-lactation_days <- mean(lactation_duration$lactation_days) #from our data
+lactation_days <- mean(model_variables$lactation_duration) #from our data
 delta_MOA <- 0.10 #change in MOA we want to predict for
 retention_fraction <- 0.667 # proportion of milk mass retained as pup mass (Ortiz et al. 1984)
 
