@@ -171,7 +171,7 @@ ggplot(tide_wave_flagged, aes(x = season, y = n_extreme_both)) +
        y = "Number of Extreme Events") +
   theme_minimal()
 
- # Seal density data processing -----------------------------------------
+# Seal density data processing -----------------------------------------
 
 # 1a) Calculate average density per area-season for modeling, then link to assigned harems
 area_density <- seal_density_data %>%
@@ -325,4 +325,4 @@ processed_data_3day <- metadata_3day %>%
 
 ##write sensitivity dataframe
 write.csv(processed_data_3day, here("IntermediateData", "MOA_data_pull_3day.csv"), row.names = FALSE, na = "NA")
-  
+

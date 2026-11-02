@@ -55,12 +55,12 @@ nsim <- 100 # keep 100 simulations
 ### Get modeling variables from data pull csv ###
 
 model_variables <- read_csv(here("IntermediateData", "MOA_data_pull.csv"), show_col_types = FALSE)
-  
+
 ##Setting age threshold and experience threshold (see Tables S2 and S5)
 age_thresh <- 8
 
 exp_thresh <- 5
-  
+
 ##Setting thresholds in data
 model_variables <- model_variables %>%
   mutate(age_cat = factor(ifelse(age < age_thresh, "Young", "Old"),
@@ -142,16 +142,16 @@ check_collinearity(mod_wean_mass) #check predictor VIFs
 
 # Wald 95% CI for the MOA coefficient
 MOA_weanmass_coef_CI <- confint(mod_wean_mass, 
-                       parm = "MOA_proportion",
-                       method = "Wald" )
+                                parm = "MOA_proportion",
+                                method = "Wald" )
 
 # Convert coefficient and CI to the effect of a 0.10 increase in MOA
 MOA_weanmass_effect_summary <- tibble(MOA_start = 0.85,
-                             MOA_end = 0.95,
-                             MOA_change = 0.10,
-                             mass_change_kg = fixef(mod_wean_mass)["MOA_proportion"] * 0.10,
-                             CI_lower_kg = MOA_weanmass_coef_CI[1] * 0.10,
-                             CI_upper_kg = MOA_weanmass_coef_CI[2] * 0.10); MOA_weanmass_effect_summary
+                                      MOA_end = 0.95,
+                                      MOA_change = 0.10,
+                                      mass_change_kg = fixef(mod_wean_mass)["MOA_proportion"] * 0.10,
+                                      CI_lower_kg = MOA_weanmass_coef_CI[1] * 0.10,
+                                      CI_upper_kg = MOA_weanmass_coef_CI[2] * 0.10); MOA_weanmass_effect_summary
 
 #### Model 2a: 1996-2025 full dataset model for age ####
 
@@ -300,8 +300,8 @@ conceptual_MOA_plot <- ggplot(MOA_plot_df, aes(date, 1, fill = pup_status)) +
                                "Observed with one pup" = "#6F8D41"),
                     drop = FALSE) +
   scale_x_date(breaks = seq(min(MOA_plot_df$date),
-                 max(MOA_plot_df$date),
-                 by = "4 days"), #start at first date, breaks every 3 days
+                            max(MOA_plot_df$date),
+                            by = "4 days"), #start at first date, breaks every 3 days
                date_labels = "%b %d",
                expand = c(0, 0)) +
   scale_y_continuous(breaks = NULL, expand = c(0, 0)) + #remove y-axis
@@ -723,7 +723,7 @@ observed_data_exp_2016_2023 <- model_variables_2016_2023 %>%
 
 # 3) Build standardized newdata for each experience value for post-stratification
 nd_by_experience_2016_2023 <- lapply(exp_vals_2016_2023, \(E) transform(model_variables_2016_2023, #retain covariate distribution
-                                                           pupping_exp = E)) #set all seals to experience value E
+                                                                        pupping_exp = E)) #set all seals to experience value E
 
 # 4) Post-stratified prediction curve (row predictions -> weighted mean)
 post_curve_exp_2016_2023 <- function(fit, season = NULL){
@@ -737,9 +737,9 @@ post_curve_exp_2016_2023 <- function(fit, season = NULL){
 
 # 5) Thin season curves (one post-stratified curve per season)
 season_lines_exp_2016_2023 <- bind_rows(lapply(seasons_2016_2023, \(S)
-                                           tibble(season_fct = S, #season grouping
-                                                  pupping_exp = exp_vals_2016_2023, #x-axis
-                                                  pred = post_curve_exp_2016_2023(mod_exp_2016_2023, season = S)))) #season-specific predictions
+                                               tibble(season_fct = S, #season grouping
+                                                      pupping_exp = exp_vals_2016_2023, #x-axis
+                                                      pred = post_curve_exp_2016_2023(mod_exp_2016_2023, season = S)))) #season-specific predictions
 
 # 6) Overall curve + parametric bootstrap CI
 post_curve_exp_overall_2016_2023 <- function(fit) post_curve_exp_2016_2023(fit, season = NULL) #overall curve
@@ -749,7 +749,7 @@ overall_exp_2016_2023 <- tibble(pupping_exp = exp_vals_2016_2023,
   left_join(observed_data_exp_2016_2023 %>% select(pupping_exp, n_exp), by = "pupping_exp") #add sample sizes
 
 boot_exp_2016_2023 <- bootMer(mod_exp_2016_2023, FUN = post_curve_exp_overall_2016_2023,
-                          nsim = nsim, type = "parametric", use.u = FALSE) #parametric bootstrap
+                              nsim = nsim, type = "parametric", use.u = FALSE) #parametric bootstrap
 
 # 7) Convert bootstrap draws into 95% CI ribbon
 ci_exp_2016_2023 <- overall_exp_2016_2023 %>%
@@ -992,7 +992,7 @@ plot_density <- ggplot() +
   labs(x = "Seal density (seals in a 10m radius)",
        y = "Mother-offspring association"); plot_density
 
- ggsave(here("TablesFigures", "Figure4b.png"), plot_density, width = 12, height = 8, dpi = 800)
+ggsave(here("TablesFigures", "Figure4b.png"), plot_density, width = 12, height = 8, dpi = 800)
 
 ########### Figure 4c (extreme wave and tide effect) ############
 
@@ -1044,7 +1044,7 @@ ci_extreme_2016_2023 <- overall_extreme_2016_2023 %>%
          hi = apply(boot_extreme_2016_2023$t, 2, quantile, 0.975, na.rm = TRUE)) #97.5% quantile at each extreme event count
 
 model_variables_2016_2023$season_fct <- factor(model_variables_2016_2023$season_fct,
-                                         levels = c("2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023"))
+                                               levels = c("2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023"))
 
 #make sample size labels next to each season
 legend_labs <- observed_extreme_2016_2023 %>%
@@ -1052,7 +1052,7 @@ legend_labs <- observed_extreme_2016_2023 %>%
   arrange(season_fct)
 
 year_labs <- setNames(paste0(legend_labs$season_fct, " (n = ", legend_labs$n_obs, ")"),
-  legend_labs$season_fct)
+                      legend_labs$season_fct)
 
 # 7) Extreme events figure: bootstrap ribbon + weighted mean line + binned observed data by season
 plot_n_extreme <- ggplot() +
@@ -1068,9 +1068,9 @@ plot_n_extreme <- ggplot() +
                   aes(n_extreme_both, avg_prop,
                       ymin = lwr, ymax = upr,
                       color = season_fct),
-    position = position_dodge(width = 1),
-    size = 1.1,
-    linewidth = 1.1) +
+                  position = position_dodge(width = 1),
+                  size = 1.1,
+                  linewidth = 1.1) +
   scale_color_manual(values = pal,
                      labels = year_labs,
                      name = "Year") +
@@ -1567,17 +1567,17 @@ make_mod_flextable <- function(model, #extract fixed effects from model
   fixed_tbl <- tidy(model, effects = "fixed") %>% #fixed effects
     mutate(Predictor = if (!is.null(predictor_labels)) {
       recode(term, !!!predictor_labels, .default = term)
-      } else {
-        term #otherwise allows us to keep original terms
-      },
-      Estimate = as.character(round(estimate, digits)), #round estimates
-      SE = as.character(round(std.error, se_digits)), #round SEs
-      Z = as.character(round(statistic, digits)), #round Z value
-      p_sci = p.value < 0.001,
-      p_mant = signif(p.value / 10^floor(log10(p.value)), 1),
-      p_exp = floor(log10(p.value)),
-      "P-value" = case_when(p_sci ~ paste0(p_mant, " x 10^", p_exp), #format p-vals
-                            TRUE ~ sprintf("%.4f", p.value))) %>%
+    } else {
+      term #otherwise allows us to keep original terms
+    },
+    Estimate = as.character(round(estimate, digits)), #round estimates
+    SE = as.character(round(std.error, se_digits)), #round SEs
+    Z = as.character(round(statistic, digits)), #round Z value
+    p_sci = p.value < 0.001,
+    p_mant = signif(p.value / 10^floor(log10(p.value)), 1),
+    p_exp = floor(log10(p.value)),
+    "P-value" = case_when(p_sci ~ paste0(p_mant, " x 10^", p_exp), #format p-vals
+                          TRUE ~ sprintf("%.4f", p.value))) %>%
     select(Predictor, Estimate, SE, Z, "P-value", p_sci, p_mant, p_exp)
   
   random_tbl <- tidy(model, effects = "ran_pars") %>% #random effects
@@ -1837,7 +1837,7 @@ exp_cutoff <- 1:11
 thr_res_exp <- map_dfr(exp_cutoff, \(e){
   d <- model_variables %>%
     mutate(experience_cat = factor(if_else(pupping_exp >= e, "Experienced", "Inexperienced"),
-                            levels = c("Inexperienced","Experienced")),
+                                   levels = c("Inexperienced","Experienced")),
            exp10 = (pupping_exp - e)/10)
   
   m <- glmer(MOA_proportion ~ experience_cat : exp10 + (1 | animalID_fct) + (1 | season_fct),
@@ -1880,4 +1880,5 @@ experience_threshold_comparison_figure <- ggplot(thr_res_exp, aes(exp_cutoff, co
   theme_classic(); experience_threshold_comparison_figure
 
 ggsave(here("TablesFigures", "FigureS5.png"), experience_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
+
 
