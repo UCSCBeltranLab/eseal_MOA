@@ -21,6 +21,7 @@ lapply(
     "viridis",
     "ggtext",
     "ggspatial",
+    "purrr",
     
     # tables
     "flextable",
@@ -63,6 +64,7 @@ exp_thresh <- 5
 
 ##Setting thresholds in data
 model_variables <- model_variables %>%
+  mutate(sex_fct = factor(sex)) %>%
   mutate(age_cat = factor(ifelse(age < age_thresh, "Young", "Old"),
                           levels = c("Young", "Old"))) %>%
   mutate(age10 = (age - age_thresh) / 10) %>% #scaled numeric version of age centered at the threshold
@@ -134,7 +136,7 @@ ggplot(model_variables, aes(x = Wt_wean_corrected)) +
        y = "Count")
 
 #fit linear model
-mod_wean_mass <- lmerTest::lmer(Wt_wean_corrected ~ MOA_proportion + age + as.factor(sex) + (1 | season_fct) + (1 | animalID_fct),
+mod_wean_mass <- lmerTest::lmer(Wt_wean_corrected ~ MOA_proportion + age_cat : age10 + sex_fct + (1 | season_fct) + (1 | animalID_fct),
                                 data = model_variables); summary(mod_wean_mass)
 fixef(mod_wean_mass)["MOA_proportion"] * 0.1
 ranef(mod_wean_mass) #random effect variance for each animalID and season
@@ -194,6 +196,7 @@ mod_age_2016_2023 <- glmer(MOA_proportion ~ age + avg_density + n_extreme_both +
                            data = model_variables_2016_2023); summary(mod_age_2016_2023)
 
 ranef(mod_age_2016_2023) #random effect variance for each animalID and season
+confint(mod_age_1996_2025, method = "Wald")
 exp(fixef(mod_age_2016_2023)) #converts fixed-effect log-odds to odds ratios
 simulateResiduals(mod_age_2016_2023, plot = TRUE) #plot residuals
 check_collinearity(mod_age_2016_2023) #check predictor VIFs
@@ -213,6 +216,7 @@ mod_exp_1996_2025 <- glmer(MOA_proportion ~ experience_cat : exp10 + (1 | animal
                            data = model_variables); summary(mod_exp_1996_2025)
 
 ranef(mod_exp_1996_2025) #random effect variance for each animalID and season
+confint(mod_exp_1996_2025, method = "Wald")
 exp(fixef(mod_exp_1996_2025)) #converts fixed-effect log-odds to odds ratios
 resid_exp <- simulateResiduals(mod_exp_1996_2025, plot = TRUE) #plot residuals
 plotResiduals(resid_exp, form = model_variables$experience_cat) #experience cat residuals
@@ -378,7 +382,7 @@ model_variables_wean <- model_variables %>%
 
 # 1) Predicted effect of mother-offspring association on wean mass
 pred_wean_mass <- ggpredict(mod_wean_mass,
-                            terms = "MOA_proportion")
+                            terms = "MOA_proportion [all]")
 
 # 2) Plot model predictions
 plot_wean <- ggplot() +
@@ -1091,6 +1095,7 @@ model_variables_3day <- read_csv(here("IntermediateData", "MOA_data_pull_3day.cs
 
 ##Setting thresholds in data
 model_variables_3day <- model_variables_3day %>%
+  mutate(sex_fct = factor(sex)) %>%
   mutate(age_cat = factor(ifelse(age < age_thresh, "Young", "Old"),
                           levels = c("Young", "Old"))) %>%
   mutate(age10 = (age - age_thresh) / 10) %>% #scaled numeric version of age centered at the threshold
@@ -1107,7 +1112,7 @@ model_variables_3day_2016_2023 <- model_variables_3day %>%
   mutate(season_fct = droplevels(season_fct))
 
 # 1) refit models using 3-day sensitivity dataset
-mod_wean_mass_3day <- lmerTest::lmer(Wt_wean_corrected ~ MOA_proportion + age + (1 | season_fct) + (1 | animalID_fct),
+mod_wean_mass_3day <- lmerTest::lmer(Wt_wean_corrected ~ MOA_proportion + age + sex_fct + (1 | season_fct) + (1 | animalID_fct),
                                      data = model_variables_3day)
 
 mod_age_1996_2025_3day <- glmer(MOA_proportion ~ age_cat : age10 + (1 | animalID_fct) + (1 | season_fct),
@@ -1135,11 +1140,11 @@ mod_exp_2016_2023_3day <- glmer(MOA_proportion ~ pupping_exp + avg_density + n_e
                                 data = model_variables_3day_2016_2023)
 
 # 2) store models
-models_3day <- list("Weaning mass" = mod_wean_mass_3day,
-                    "Maternal age, 1996–2025" = mod_age_1996_2025_3day,
-                    "Pupping experience, 1996–2025" = mod_exp_1996_2025_3day,
-                    "Maternal age, 2016–2023" = mod_age_2016_2023_3day,
-                    "Pupping experience, 2016–2023" = mod_exp_2016_2023_3day)
+models_3day <- list("Weaning mass (LMM)" = mod_wean_mass_3day,
+                    "Maternal age, 1996–2025 (breakpoint GLMM)" = mod_age_1996_2025_3day,
+                    "Pupping experience, 1996–2025 (breakpoint GLMM)" = mod_exp_1996_2025_3day,
+                    "Maternal age, 2016–2023 (GLMM)" = mod_age_2016_2023_3day,
+                    "Pupping experience, 2016–2023 (GLMM)" = mod_exp_2016_2023_3day)
 
 # 3) predictor labels
 predictor_labels_3day <- c("(Intercept)" = "Intercept",
@@ -1157,41 +1162,36 @@ predictor_labels_3day <- c("(Intercept)" = "Intercept",
 sensitivity_table_3day <- imap_dfr(models_3day, function(model, model_name) {
   
   fixed_tbl <- tidy(model, effects = "fixed") %>%
-    mutate(Model = model_name,
-           Predictor = recode(term, !!!predictor_labels_3day, .default = term),
-           Estimate = as.character(round(estimate, 3)),
-           SE = as.character(round(std.error, 2)),
-           Z = as.character(round(statistic, 3)),
-           p_sci = p.value < 0.001,
-           p_mant = signif(p.value / 10^floor(log10(p.value)), 1),
-           p_exp = floor(log10(p.value)),
-           "P-value" = case_when(
-             p_sci ~ paste0(p_mant, " x 10^", p_exp),
-             TRUE ~ sprintf("%.4f", p.value))) %>%
-    select(Model, Predictor, Estimate, SE, Z,
-           "P-value", p_sci, p_mant, p_exp)
+    transmute(Model = model_name,
+              Predictor = recode(term, !!!predictor_labels_3day, .default = term),
+              Estimate = sprintf("%.3f", estimate),
+              SE = sprintf("%.3f", std.error),
+              Z = sprintf("%.3f", statistic),
+              "P-value" = case_when(is.na(p.value) ~ "",
+                                    p.value < 0.001 ~ "< 0.001",
+                                    TRUE ~ sprintf("%.4f", p.value)),
+              Variance = "",
+              "Std. Dev." = "")
   
-  random_tbl <- tidy(model, effects = "ran_pars") %>%
+  random_tbl <- tidy(model, effects = "ran_pars", scales = "sdcor") %>%
     transmute(Model = model_name,
               Predictor = paste0("Random effect: ",
                                  recode(group,
                                         animalID_fct = "AnimalID",
                                         season_fct = "Year",
                                         Residual = "Residual")),
-              Estimate = as.character(round(estimate^2, 3)),
+              Estimate = "",
               SE = "",
               Z = "",
               "P-value" = "",
-              p_sci = FALSE,
-              p_mant = NA_real_,
-              p_exp = NA_real_)
+              Variance = sprintf("%.3f", estimate^2),
+              "Std. Dev." = sprintf("%.3f", estimate))
   
   bind_rows(fixed_tbl, random_tbl)
 })
 
-# 5) make combined flextable
+# 5) Make combined flextable
 sensitivity_table_3day_ft <- sensitivity_table_3day %>%
-  select(Model, Predictor, Estimate, SE, Z, "P-value") %>%
   flextable() %>%
   merge_v(j = "Model") %>%
   valign(j = "Model", valign = "top", part = "body") %>%
@@ -1199,24 +1199,9 @@ sensitivity_table_3day_ft <- sensitivity_table_3day %>%
   bold(j = "Model", part = "body") %>%
   autofit()
 
-# 6) format scientific P-values
-sci_rows <- which(sensitivity_table_3day$p_sci %in% TRUE)
-
-if (length(sci_rows) > 0) {
-  sensitivity_table_3day_ft <- flextable::compose(
-    sensitivity_table_3day_ft,
-    i = sci_rows,
-    j = "P-value",
-    value = as_paragraph(
-      as_chunk(sensitivity_table_3day$p_mant[sci_rows]),
-      " × 10",
-      as_sup(as_chunk(sprintf("%.0f",
-                              sensitivity_table_3day$p_exp[sci_rows])))))
-}
-
 sensitivity_table_3day_ft
 
-# 7) save final table
+# 6) Save final table
 save_as_docx(sensitivity_table_3day_ft, path = here("TablesFigures", "Table_S1_3day_birth_date_sensitivity.docx"))
 
 #### Table S2 (age threshold comparison) ####
@@ -1559,60 +1544,48 @@ save_as_docx(aic_table_exp_2016_2023, path = here("TablesFigures", "2016_2023_Ex
 #### Tables S8-S12 (model outputs) ####
 
 # 1) model output table function
-make_mod_flextable <- function(model, #extract fixed effects from model
-                               predictor_labels = NULL, #relabel predictors if we relabel
-                               digits = 3, #
+make_mod_flextable <- function(model,
+                               predictor_labels = NULL,
+                               digits = 3,
                                se_digits = 2,
                                save_path = NULL) {
   
-  fixed_tbl <- tidy(model, effects = "fixed") %>% #fixed effects
+  fixed_tbl <- tidy(model, effects = "fixed") %>%
     mutate(Predictor = if (!is.null(predictor_labels)) {
       recode(term, !!!predictor_labels, .default = term)
     } else {
-      term #otherwise allows us to keep original terms
+      term
     },
-    Estimate = as.character(round(estimate, digits)), #round estimates
-    SE = as.character(round(std.error, se_digits)), #round SEs
-    Z = as.character(round(statistic, digits)), #round Z value
-    p_sci = p.value < 0.001,
-    p_mant = signif(p.value / 10^floor(log10(p.value)), 1),
-    p_exp = floor(log10(p.value)),
-    "P-value" = case_when(p_sci ~ paste0(p_mant, " x 10^", p_exp), #format p-vals
-                          TRUE ~ sprintf("%.4f", p.value))) %>%
-    select(Predictor, Estimate, SE, Z, "P-value", p_sci, p_mant, p_exp)
+    Estimate = as.character(round(estimate, digits)),
+    SE = as.character(round(std.error, se_digits)),
+    Z = as.character(round(statistic, digits)),
+    "P-value" = case_when(is.na(p.value) ~ "",
+                          p.value < 0.001 ~ "< 0.001",
+                          TRUE ~ sprintf("%.4f", p.value)),
+    Variance = "",
+    "Std. Dev." = "") %>%
+    select(Predictor, Estimate, SE, Z, "P-value", Variance, "Std. Dev.")
   
-  random_tbl <- tidy(model, effects = "ran_pars") %>% #random effects
-    transmute(Predictor = paste0("Random effect: ", 
+  random_tbl <- tidy(model, effects = "ran_pars", scales = "sdcor") %>%
+    transmute(Predictor = paste0("Random effect: ",
                                  recode(group,
-                                        animalID_fct = "AnimalID", 
+                                        animalID_fct = "AnimalID",
                                         season_fct = "Year",
                                         Residual = "Residual")),
-              Estimate = as.character(round(estimate^2, digits)), #rounded ranef estimate
+              Estimate = "",
               SE = "",
               Z = "",
               "P-value" = "",
-              p_sci = FALSE,
-              p_mant = NA_real_,
-              p_exp = NA_real_)
+              Variance = as.character(round(estimate^2, digits)),
+              "Std. Dev." = as.character(round(estimate, digits)))
   
   out_tbl <- bind_rows(fixed_tbl, random_tbl)
   
   ft <- out_tbl %>%
-    select(Predictor, Estimate, SE, Z, "P-value") %>%
+    select(Predictor, Estimate, SE, Z, "P-value", Variance, "Std. Dev.") %>%
     flextable() %>%
     align(align = "center", part = "all") %>%
     autofit()
-  
-  sci_rows <- which(out_tbl$p_sci %in% TRUE)
-  
-  if (length(sci_rows) > 0) {
-    ft <- flextable::compose(ft,
-                             i = sci_rows,
-                             j = "P-value",
-                             value = as_paragraph(as_chunk(out_tbl$p_mant[sci_rows]),
-                                                  " × 10",
-                                                  as_sup(as_chunk(sprintf("%.0f", out_tbl$p_exp[sci_rows])))))
-  }
   
   if (!is.null(save_path)) {
     save_as_docx(ft, path = save_path)
@@ -1658,7 +1631,75 @@ make_mod_flextable(mod_exp_2016_2023,
                                         "avg_density" = "Seal density"),
                    save_path = here("TablesFigures", "mod_exp_2016_2023_output.docx"))
 
-#### Figure S1 (variation in pupping experience within ages) ####
+#### Figure S1 (DHARMa plot residuals) ####
+
+models <- list("a. Weaning mass LMM" = mod_wean_mass,
+               "b. Age breakpoint GLMM (1996–2025)" = mod_age_1996_2025,
+               "c. Age GLMM (2016–2023)" = mod_age_2016_2023,
+               "d. Experience breakpoint GLMM (1996–2025)" = mod_exp_1996_2025,
+               "e. Experience GLMM (2016–2023)" = mod_exp_2016_2023)
+
+# Simulate residuals
+residuals_list <- lapply(models, function(model) {
+  simulateResiduals(model, n = 1000)
+})
+
+# Save high-resolution figure
+ragg::agg_png(filename = here("TablesFigures", "FigureS1.png"),
+              width = 12,
+              height = 16,
+              units = "in",
+              res = 300,
+              pointsize = 14,
+              background = "white")
+
+# Dedicated header row + five model rows
+layout(matrix(c(1, 2, 3:12), ncol = 2, byrow = TRUE),
+       heights = c(0.5, rep(3, 5)))
+
+par(mar = c(4, 4, 2.5, 1.5),
+    cex.axis = 0.9,
+    cex.lab = 1,
+    cex.main = 1)
+
+# Column headers
+for (header in c("Q-Q plot", "Residuals vs. Predicted")) {
+  par(mar = c(0, 0, 0, 0))
+  plot.new()
+  text(0.5, 0.5, header,
+       font = 2,
+       cex = 1.8)
+}
+
+# Diagnostic panels
+for (i in seq_along(residuals_list)) {
+  
+  res <- residuals_list[[i]]
+  name <- names(residuals_list)[i]
+  
+  par(mar = c(4, 4, 3, 1.5))
+  
+  # Left: Q-Q plot
+  plotQQunif(res,
+             main = "",
+             cex = 0.6)
+  
+  mtext(name,
+        side = 3,
+        line = 1,
+        font = 2,
+        cex = 1)
+  
+  # Right: residuals vs. predicted
+  plotResiduals(res,
+                form = res$fittedPredictedResponse,
+                main = "",
+                cex = 0.6)
+}
+
+dev.off()
+
+#### Figure S2 (variation in pupping experience within ages) ####
 
 # reproductive experience vs age figure
 
@@ -1707,70 +1748,9 @@ plot_variation_exp <- ggplot(model_variables,
   labs(x = "Maternal age (years)",
        y = "Previous pupping experience (number of pups)"); plot_variation_exp
 
-ggsave(here("TablesFigures", "FigureS1.png"), plot_variation_exp, width = 8, height = 6, dpi = 600)
+ggsave(here("TablesFigures", "FigureS2.png"), plot_variation_exp, width = 8, height = 6, dpi = 600)
 
-#### Figure S2 (density with raw data points) ####
-
-# Density plot: bootstrap ribbon + weighted mean line + raw points weighted by total resights
-plot_density_jitter <- ggplot() +
-  geom_jitter(data = model_variables_2016_2023,
-              aes(avg_density,
-                  MOA_proportion,
-                  size = total_resights,
-                  color = avg_density),
-              alpha = 0.3,
-              width = 0.15,
-              height = 0.02) +
-  geom_ribbon(data = ci_density_2016_2023,
-              aes(avg_density, ymin = lo, ymax = hi),
-              fill = "black",
-              alpha = 0.3) +
-  geom_line(data = ci_density_2016_2023,
-            aes(avg_density, pred),
-            color = "black",
-            linewidth = 1.3) +
-  scale_color_viridis_c(option = "mako",
-                        direction = -1,
-                        limits = density_limits,
-                        name = "Seal density") +
-  scale_size_continuous(name = "Observations") +
-  coord_cartesian(ylim = c(0, 1.01), clip = "off") +
-  theme_few(base_size = 18) +
-  labs(x = "Seal density (seals in a 10m radius)",
-       y = "Mother-offspring association"); plot_density_jitter
-
-ggsave(here("TablesFigures", "FigureS2.png"), plot_density_jitter, width = 12, height = 8, dpi = 800)
-
-#### Figure S3 (extreme events with raw data points) ####
-
-# 9) Make extreme events plot with jittered raw points
-plot_n_extreme_jitter <- ggplot() +
-  geom_jitter(data = model_variables_2016_2023, #raw observations weighted by resights
-              aes(n_extreme_both, MOA_proportion, size = total_resights, color = season_fct),
-              alpha = 0.35,
-              width = 0.15,
-              height = 0.02) +
-  geom_ribbon(data = ci_extreme_2016_2023, #bootstrap CI band for overall curve
-              aes(n_extreme_both, ymin = lo, ymax = hi),
-              fill = "black",
-              alpha = 0.3) +
-  geom_line(data = ci_extreme_2016_2023, #overall post-stratified prediction line
-            aes(n_extreme_both, pred),
-            color = "black",
-            linewidth = 1.3) +
-  scale_color_manual(values = pal, name = "Year") +
-  scale_size_continuous(name = "Observations") +
-  guides(color = guide_legend(override.aes = list(size = 5))) +
-  scale_x_continuous(n.breaks = 10) +
-  scale_y_continuous(n.breaks = 5) +
-  coord_cartesian(ylim = c(0, 1), clip = "off") +
-  theme_few(base_size = 18) +
-  labs(x = "Number of extreme wave and tide events per year",
-       y = "Mother-offspring association"); plot_n_extreme_jitter
-
-ggsave(here("TablesFigures", "FigureS3.png"), plot_n_extreme_jitter, width = 12, height = 8, dpi = 800)
-
-#### Figure S4 (age threshold significance comparison) ####
+#### Figure S3 (age threshold significance comparison) ####
 
 #test all possible thresholds
 age_cutoff <- 5:14
@@ -1824,9 +1804,9 @@ age_threshold_comparison_figure <- ggplot(thr_res_age, aes(age_cutoff, coef)) +
        y = "Estimated old slope (log-odds)") +
   theme_classic(); age_threshold_comparison_figure
 
-ggsave(here("TablesFigures","FigureS4.png"), age_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
+ggsave(here("TablesFigures","FigureS3.png"), age_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
 
-###################### Figure S5 (experience threshold significance comparison) ############################
+###################### Figure S4 (experience threshold significance comparison) ############################
 
 #test all possible thresholds
 exp_cutoff <- 1:11
@@ -1880,7 +1860,68 @@ experience_threshold_comparison_figure <- ggplot(thr_res_exp, aes(exp_cutoff, co
        y = "Estimated experienced slope (log-odds)") +
   theme_classic(); experience_threshold_comparison_figure
 
-ggsave(here("TablesFigures", "FigureS5.png"), experience_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
+ggsave(here("TablesFigures", "FigureS4.png"), experience_threshold_comparison_figure, width = 8, height = 6, dpi = 600)
+
+#### Figure S5 (density with raw data points) ####
+
+# Density plot: bootstrap ribbon + weighted mean line + raw points weighted by total resights
+plot_density_jitter <- ggplot() +
+  geom_jitter(data = model_variables_2016_2023,
+              aes(avg_density,
+                  MOA_proportion,
+                  size = total_resights,
+                  color = avg_density),
+              alpha = 0.3,
+              width = 0.15,
+              height = 0.02) +
+  geom_ribbon(data = ci_density_2016_2023,
+              aes(avg_density, ymin = lo, ymax = hi),
+              fill = "black",
+              alpha = 0.3) +
+  geom_line(data = ci_density_2016_2023,
+            aes(avg_density, pred),
+            color = "black",
+            linewidth = 1.3) +
+  scale_color_viridis_c(option = "mako",
+                        direction = -1,
+                        limits = density_limits,
+                        name = "Seal density") +
+  scale_size_continuous(name = "Observations") +
+  coord_cartesian(ylim = c(0, 1.01), clip = "off") +
+  theme_few(base_size = 18) +
+  labs(x = "Seal density (seals in a 10m radius)",
+       y = "Mother-offspring association"); plot_density_jitter
+
+ggsave(here("TablesFigures", "FigureS5.png"), plot_density_jitter, width = 12, height = 8, dpi = 800)
+
+#### Figure S6 (extreme events with raw data points) ####
+
+# 9) Make extreme events plot with jittered raw points
+plot_n_extreme_jitter <- ggplot() +
+  geom_jitter(data = model_variables_2016_2023, #raw observations weighted by resights
+              aes(n_extreme_both, MOA_proportion, size = total_resights, color = season_fct),
+              alpha = 0.35,
+              width = 0.15,
+              height = 0.02) +
+  geom_ribbon(data = ci_extreme_2016_2023, #bootstrap CI band for overall curve
+              aes(n_extreme_both, ymin = lo, ymax = hi),
+              fill = "black",
+              alpha = 0.3) +
+  geom_line(data = ci_extreme_2016_2023, #overall post-stratified prediction line
+            aes(n_extreme_both, pred),
+            color = "black",
+            linewidth = 1.3) +
+  scale_color_manual(values = pal, name = "Year") +
+  scale_size_continuous(name = "Observations") +
+  guides(color = guide_legend(override.aes = list(size = 5))) +
+  scale_x_continuous(n.breaks = 10) +
+  scale_y_continuous(n.breaks = 5) +
+  coord_cartesian(ylim = c(0, 1), clip = "off") +
+  theme_few(base_size = 18) +
+  labs(x = "Number of extreme wave and tide events per year",
+       y = "Mother-offspring association"); plot_n_extreme_jitter
+
+ggsave(here("TablesFigures", "FigureS6.png"), plot_n_extreme_jitter, width = 12, height = 8, dpi = 800)
 
 
 # SENSITIVITY ANALYSES (to address comments) ------------------------------------
@@ -1902,16 +1943,18 @@ check_collinearity(mod_wean_mass_sensitivity) #check predictor VIFs
 # Full dataset (1996–2025), restricted to known pup sex
 model_variables_sex <- model_variables %>%
   filter(!is.na(sex)) %>%
+  mutate(sex_fct = as.factor(sex)) %>%
   droplevels()
 
 # Environmental subset (2016–2023), restricted to known pup sex
 model_variables_2016_2023_sex <- model_variables_2016_2023 %>%
   filter(!is.na(sex)) %>%
+  mutate(sex_fct = as.factor(sex)) %>%
   droplevels()
 
 ### Model 2a: Age breakpoint, with pup sex ###
 
-mod_age_1996_2025_sex <- glmer(MOA_proportion ~ age_cat : age10 + as.factor(sex) + (1 | animalID_fct) + (1 | season_fct),
+mod_age_1996_2025_sex <- glmer(MOA_proportion ~ age_cat : age10 + sex_fct + (1 | animalID_fct) + (1 | season_fct),
                                weights = total_resights,
                                family = binomial(link = "logit"),
                                control = glmerControl(optimizer = "bobyqa"),
@@ -1923,7 +1966,7 @@ simulateResiduals(mod_age_1996_2025_sex, plot = TRUE)
 
 ### Model 2b: Age, density, extreme events, with pup sex ###
 
-mod_age_2016_2023_sex <- glmer(MOA_proportion ~ age + avg_density + n_extreme_both + as.factor(sex) + (1 | animalID_fct) + (1 | season_fct),
+mod_age_2016_2023_sex <- glmer(MOA_proportion ~ age + avg_density + n_extreme_both + sex_fct + (1 | animalID_fct) + (1 | season_fct),
                                weights = total_resights,
                                family = binomial(link = "logit"),
                                control = glmerControl(optimizer = "bobyqa"),
@@ -1935,7 +1978,7 @@ check_collinearity(mod_age_2016_2023_sex)
 
 ### Model 3a: Experience breakpoint, with pup sex ###
 
-mod_exp_1996_2025_sex <- glmer(MOA_proportion ~ experience_cat : exp10 + as.factor(sex) + (1 | animalID_fct) + (1 | season_fct),
+mod_exp_1996_2025_sex <- glmer(MOA_proportion ~ experience_cat : exp10 + sex_fct + (1 | animalID_fct) + (1 | season_fct),
                                weights = total_resights,
                                family = binomial(link = "logit"),
                                control = glmerControl(optimizer = "bobyqa"),
@@ -1946,7 +1989,7 @@ simulateResiduals(mod_exp_1996_2025_sex, plot = TRUE)
 
 ### Model 3b: Experience, density, extreme events, with pup sex ###
 
-mod_exp_2016_2023_sex <- glmer(MOA_proportion ~ pupping_exp + avg_density + n_extreme_both + as.factor(sex) + (1 | animalID_fct) + (1 | season_fct),
+mod_exp_2016_2023_sex <- glmer(MOA_proportion ~ pupping_exp + avg_density + n_extreme_both + sex_fct + (1 | animalID_fct) + (1 | season_fct),
                                weights = total_resights,
                                family = binomial(link = "logit"),
                                control = glmerControl(optimizer = "bobyqa"),
@@ -1958,7 +2001,7 @@ check_collinearity(mod_exp_2016_2023_sex)
 
 #### Models removing cases of pup mortality or permanent separation ####
 
-model_variables_no_mortality <- read_csv(here("IntermediateData", "MOA_data_pull_no_early_separation.csv"), show_col_types = FALSE)
+model_variables_no_mortality <- read_csv(here("IntermediateData", "MOA_data_pull_no_terminal_separation.csv"), show_col_types = FALSE)
 
 ##Setting age threshold and experience threshold (see Tables S2 and S5)
 age_thresh <- 8

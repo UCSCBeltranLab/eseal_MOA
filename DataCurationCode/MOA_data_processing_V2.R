@@ -321,7 +321,7 @@ processed_data_3day <- metadata_3day %>%
   mutate(birth_date = as.Date(birth_date)) %>%
   left_join(area_density_3day %>% select(animalID, season, dominant_area, avg_density), by = c("animalID", "season")) %>%
   left_join(tide_wave_flagged %>% select(season, n_extreme_both), by = "season") %>%
-  left_join(weaner_data %>% select(animalID, pupID, season, Wt_wean_corrected), by = c("animalID", "season"))
+  left_join(weaner_data %>% select(animalID, pupID, sex, season, Wt_wean_corrected), by = c("animalID", "season"))
 
 ##write sensitivity dataframe
 write.csv(processed_data_3day, here("IntermediateData", "MOA_data_pull_3day.csv"), row.names = FALSE, na = "NA")
@@ -333,12 +333,18 @@ possible_separation <- metadata %>%
   filter(date >= birth_date) %>%
   arrange(animalID, season, date) %>%
   group_by(animalID, season) %>%
-  mutate(last_withpup_one = max(which(withpup == 1)), #position of last observation with the pup present
-         terminal_zero = row_number() > last_withpup_one & withpup == 0, #flag pup absences after the last confirmed association
-         pup_age = as.numeric(date - birth_date)) %>% #calculate pup age
-  summarise(n_terminal_zeros = sum(terminal_zero), #count obs where pup was absent after last confirmed obs
-            any_terminal_absence = n_terminal_zeros >= 2, #ensures that it's not just a 0 in the final observation
-            .groups = "drop")
+  mutate(last_withpup_one = max(which(withpup == 1)),
+         terminal_zero = row_number() > last_withpup_one & withpup == 0,
+         pup_age = as.numeric(date - birth_date)) %>%
+  summarise(n_terminal_zeros = sum(terminal_zero),
+            first_terminal_age = if (any(terminal_zero)) {
+              min(pup_age[terminal_zero], na.rm = TRUE)
+              } else {
+                NA_real_},
+    any_terminal_absence = n_terminal_zeros >= 5 &
+      !is.na(first_terminal_age) &
+      first_terminal_age <= 24,
+    .groups = "drop")
 
 # Count flagged female-seasons
 table(possible_separation$any_terminal_absence)
@@ -347,7 +353,7 @@ table(possible_separation$any_terminal_absence)
 processed_data_sensitivity <- processed_data %>%
   left_join(possible_separation,
             by = c("animalID", "season")) %>%
-  mutate(early_terminal_absence = coalesce(early_terminal_absence, FALSE),any_terminal_absence = coalesce(any_terminal_absence, FALSE))
+  mutate(any_terminal_absence = coalesce(any_terminal_absence, FALSE), any_terminal_absence = coalesce(any_terminal_absence, FALSE))
 
 # Exclude any terminal absences
 processed_data_no_terminal_separation <- processed_data_sensitivity %>%
